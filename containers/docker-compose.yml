@@ -1,0 +1,77 @@
+version: '3.8'
+
+services:
+  orchestrator:
+    build:
+      context: ..
+      dockerfile: containers/Dockerfile
+    container_name: claude-orchestrator
+    volumes:
+      - orchestrator_workspace:/workspace
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      - AGENT_ID=orchestrator
+      - WORKSPACE=/workspace
+    command: python3 -m conductor.orchestrator --agents 3
+    networks:
+      - claude-network
+    ports:
+      - "8080:8080"  # Future web UI
+
+  agent-001:
+    build:
+      context: ..
+      dockerfile: containers/Dockerfile
+    container_name: claude-agent-001
+    volumes:
+      - agent_001_workspace:/workspace
+    environment:
+      - AGENT_ID=agent_001
+      - WORKSPACE=/workspace
+      - ORCHESTRATOR_SOCKET=/tmp/claude_orchestrator.sock
+    depends_on:
+      - orchestrator
+    networks:
+      - claude-network
+
+  agent-002:
+    build:
+      context: ..
+      dockerfile: containers/Dockerfile
+    container_name: claude-agent-002
+    volumes:
+      - agent_002_workspace:/workspace
+    environment:
+      - AGENT_ID=agent_002
+      - WORKSPACE=/workspace
+      - ORCHESTRATOR_SOCKET=/tmp/claude_orchestrator.sock
+    depends_on:
+      - orchestrator
+    networks:
+      - claude-network
+
+  agent-003:
+    build:
+      context: ..
+      dockerfile: containers/Dockerfile
+    container_name: claude-agent-003
+    volumes:
+      - agent_003_workspace:/workspace
+    environment:
+      - AGENT_ID=agent_003
+      - WORKSPACE=/workspace
+      - ORCHESTRATOR_SOCKET=/tmp/claude_orchestrator.sock
+    depends_on:
+      - orchestrator
+    networks:
+      - claude-network
+
+volumes:
+  orchestrator_workspace:
+  agent_001_workspace:
+  agent_002_workspace:
+  agent_003_workspace:
+
+networks:
+  claude-network:
+    driver: bridge

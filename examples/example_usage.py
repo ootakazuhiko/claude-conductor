@@ -4,7 +4,7 @@ Example usage of Claude Code Orchestrator
 """
 
 import time
-from src.orchestrator import Orchestrator, Task
+from conductor import Orchestrator, Task, create_task
 
 def main():
     # オーケストレーターを作成
@@ -19,7 +19,7 @@ def main():
     
     # タスク1: 単一ファイルのレビュー
     print("\n--- Task 1: Single file review ---")
-    task1 = Task(
+    task1 = create_task(
         task_type="code_review",
         description="Review Python file for style and bugs",
         files=["examples/sample_code.py"]
@@ -31,7 +31,7 @@ def main():
     
     # タスク2: 並列レビュー
     print("\n--- Task 2: Parallel review ---")
-    task2 = Task(
+    task2 = create_task(
         task_type="code_review",
         description="Review multiple files in parallel",
         parallel=True,
