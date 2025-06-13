@@ -370,14 +370,14 @@ class Orchestrator:
             return error_result
         
     def execute_parallel_task(self, task: Task) -> List[TaskResult]:
-        """並列タスクを実行"""
+        """Execute parallel task with subtasks"""
         if not task.subtasks:
             return [self.execute_task(task)]
             
         futures: List[tuple] = []
         results: List[TaskResult] = []
         
-        # サブタスクを並列実行
+        # Execute subtasks in parallel
         for i, subtask_def in enumerate(task.subtasks):
             subtask = Task(
                 task_id=f"{task.task_id}_sub{i}",
@@ -393,7 +393,7 @@ class Orchestrator:
                 future = self.executor.submit(agent.execute_task, subtask)
                 futures.append((future, agent.agent_id, subtask))
             else:
-                # エージェントが利用できない場合のエラー結果
+                # Error result when no agent is available
                 error_result = TaskResult(
                     task_id=subtask.task_id,
                     agent_id="none",
@@ -403,7 +403,7 @@ class Orchestrator:
                 )
                 results.append(error_result)
                 
-        # 結果を収集
+        # Collect results
         for future, agent_id, subtask in futures:
             try:
                 result = future.result(timeout=subtask.timeout)
@@ -423,21 +423,21 @@ class Orchestrator:
         return results
         
     def _get_available_agent(self) -> Optional[ClaudeAgent]:
-        """利用可能なエージェントを取得"""
-        # 現在タスクを実行していないエージェントを探す
+        """Get available agent for task execution"""
+        # Find agent not currently executing a task
         for agent in self.agents.values():
             if agent.is_running and agent.current_task is None:
                 return agent
                 
-        # 全てビジーの場合は、最も負荷の低いエージェントを選択
-        # （簡易実装：最初のエージェントを選択）
+        # If all are busy, select the least loaded agent
+        # (Simple implementation: select first agent)
         if self.agents:
             return list(self.agents.values())[0]
             
         return None
         
     def _update_stats(self, result: TaskResult):
-        """統計情報を更新"""
+        """Update execution statistics"""
         if result.status == "success":
             self.stats["tasks_completed"] += 1
         else:
@@ -446,9 +446,9 @@ class Orchestrator:
         self.stats["total_execution_time"] += result.execution_time
         
     def _stats_reporter(self):
-        """定期的に統計情報を報告"""
+        """Periodic statistics reporter thread"""
         while self.agents:
-            time.sleep(60)  # 1分ごと
+            time.sleep(60)  # Every minute
             
             if not any(agent.is_running for agent in self.agents.values()):
                 break
@@ -460,14 +460,14 @@ class Orchestrator:
             )
             
     def _get_avg_execution_time(self) -> float:
-        """平均実行時間を取得"""
+        """Get average execution time"""
         total_tasks = self.stats["tasks_completed"] + self.stats["tasks_failed"]
         if total_tasks == 0:
             return 0.0
         return self.stats["total_execution_time"] / total_tasks
         
     def _print_final_stats(self):
-        """最終統計情報を出力"""
+        """Print final execution statistics"""
         runtime = time.time() - self.stats["start_time"] if self.stats["start_time"] else 0
         
         print("\n=== Final Statistics ===")
@@ -479,7 +479,7 @@ class Orchestrator:
         print(f"Active agents: {len([a for a in self.agents.values() if a.is_running])}/{len(self.agents)}")
         
     def get_agent_status(self) -> Dict[str, Any]:
-        """全エージェントのステータスを取得"""
+        """Get status of all agents"""
         status = {}
         for agent_id, agent in self.agents.items():
             status[agent_id] = {
@@ -491,11 +491,11 @@ class Orchestrator:
         return status
         
     def get_task_result(self, task_id: str) -> Optional[TaskResult]:
-        """タスク結果を取得"""
+        """Get task execution result by ID"""
         return self.results.get(task_id)
         
     def get_statistics(self) -> Dict[str, Any]:
-        """統計情報を取得"""
+        """Get orchestrator execution statistics"""
         runtime = time.time() - self.stats["start_time"] if self.stats["start_time"] else 0
         return {
             "runtime": runtime,
@@ -508,7 +508,7 @@ class Orchestrator:
         }
 
 def create_task(task_type: str = "generic", description: str = "", files: List[str] = None, **kwargs) -> Task:
-    """タスクを簡単に作成するためのヘルパー関数"""
+    """Helper function to easily create tasks"""
     if files is None:
         files = []
     
@@ -519,7 +519,7 @@ def create_task(task_type: str = "generic", description: str = "", files: List[s
         **kwargs
     )
 
-# CLIエントリーポイント
+# CLI entry point
 def main():
     import argparse
     
@@ -534,21 +534,21 @@ def main():
     if args.debug:
         logging.getLogger().setLevel(logging.DEBUG)
         
-    # オーケストレーター作成
+    # Create orchestrator
     orchestrator = Orchestrator(args.config)
     
     if args.agents:
         orchestrator.config["num_agents"] = args.agents
         
     try:
-        # 起動
+        # Start orchestrator
         orchestrator.start()
         
         if args.demo:
-            # デモタスクを実行
+            # Execute demo tasks
             print("\n=== Running Demo Tasks ===")
             
-            # タスク1: コードレビュー
+            # Task 1: Code review
             task1 = create_task(
                 task_type="code_review",
                 description="Review sample code",
@@ -557,7 +557,7 @@ def main():
             result1 = orchestrator.execute_task(task1)
             print(f"Code review task: {result1.status}")
             
-            # タスク2: 並列テスト生成
+            # Task 2: Parallel test generation
             task2 = create_task(
                 task_type="test_generation",
                 description="Generate tests for multiple files",
@@ -571,7 +571,7 @@ def main():
             print(f"Parallel test generation: {len(results2)} tasks completed")
             
         else:
-            # 簡単なREPL
+            # Simple REPL
             print("\nClaude Code Orchestrator started")
             print("Commands: status, stats, task <type> <description>, parallel <description>, quit")
             
