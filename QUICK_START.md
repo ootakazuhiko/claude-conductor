@@ -1,6 +1,24 @@
 # Claude Conductor - Quick Start Guide
 
-手軽に単一のPCでClaude Conductorを試すためのガイドです。
+A comprehensive guide to quickly try Claude Conductor on a single PC.
+
+手軽に単一のPCでClaude Conductorを試すための包括的なガイドです。
+
+## 🚀 One-Command Installation
+
+```bash
+# Clone repository
+git clone https://github.com/ootakazuhiko/claude-conductor.git
+cd claude-conductor
+
+# Switch to standalone subset branch
+git checkout feature/standalone-subset
+
+# Install and start
+./quick-start.sh
+```
+
+That's it! The dashboard will be available at http://localhost:8080.
 
 ## 🚀 ワンコマンドインストール
 
@@ -17,6 +35,17 @@ git checkout feature/standalone-subset
 ```
 
 これだけで完了です！ダッシュボードが http://localhost:8080 で利用可能になります。
+
+## 📋 System Requirements
+
+- **Python 3.10+** (Recommended: 3.11)
+- **Memory**: Minimum 2GB, Recommended 4GB
+- **Disk**: Minimum 1GB free space
+- **OS**: Linux, macOS, Windows (WSL2)
+
+### Optional Requirements
+- **Docker/Podman**: For container mode
+- **Git**: For cloning source code
 
 ## 📋 システム要件
 

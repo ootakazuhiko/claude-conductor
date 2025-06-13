@@ -1,10 +1,36 @@
 # Claude Conductor - Collaborative Development Demo
 
+This demo demonstrates how multiple agents collaborate to develop a web application using Claude Conductor.
+
 このデモは、Claude Conductorを使用して複数のエージェントが協調してWebアプリケーションを開発する様子を実演します。
 
-## 🎯 デモの概要
+## 🎯 Demo Overview
+
+Four specialized agents divide tasks according to their roles and develop a complete Todo management API application.
 
 4つの専門化されたエージェントが、それぞれの役割に応じてタスクを分担し、完全なTodo管理APIアプリケーションを開発します。
+
+### Agent Roles
+
+1. **Backend Developer (Agent 1)**
+   - Building Flask applications
+   - Implementing database models
+   - Creating REST API endpoints
+
+2. **Test Engineer (Agent 2)**
+   - Creating unit tests
+   - Implementing integration tests
+   - Setting up test coverage
+
+3. **DevOps Engineer (Agent 3)**
+   - Creating Dockerfiles
+   - Configuring Docker Compose
+   - Building CI/CD pipelines
+
+4. **Documentation Specialist (Agent 4)**
+   - Generating API documentation
+   - Creating user guides
+   - Creating OpenAPI specifications
 
 ### エージェントの役割
 

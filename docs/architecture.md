@@ -2,9 +2,13 @@
 
 This document describes the architecture and design principles of the Claude Conductor multi-agent orchestration system.
 
+このドキュメントでは、Claude Conductor多エージェント・オーケストレーション・システムのアーキテクチャと設計原則について説明します。
+
 ## Overview
 
 Claude Conductor is designed as a distributed system that manages multiple Claude Code instances running in isolated containers, coordinating their work through a sophisticated orchestration layer.
+
+Claude Conductorは、隔離されたコンテナで実行される複数のClaude Codeインスタンスを管理し、洗練されたオーケストレーション層を通じて作業を調整する分散システムとして設計されています。
 
 ## System Architecture
 
