@@ -5,7 +5,7 @@ from src.orchestrator import Orchestrator, Task
 from src.claude_code_wrapper import AgentConfig, ClaudeCodeWrapper
 
 def test_orchestrator_startup():
-    """オーケストレーターの起動テスト"""
+    """Test orchestrator startup"""
     orchestrator = Orchestrator()
     orchestrator.config["num_agents"] = 1
     
@@ -19,7 +19,7 @@ def test_orchestrator_startup():
     orchestrator.stop()
 
 def test_simple_task_execution():
-    """簡単なタスク実行テスト"""
+    """Test simple task execution"""
     orchestrator = Orchestrator()
     orchestrator.config["num_agents"] = 1
     
@@ -43,7 +43,7 @@ def test_simple_task_execution():
     reason="Podman not installed"
 )
 def test_container_lifecycle():
-    """コンテナライフサイクルテスト"""
+    """Test container lifecycle"""
     config = AgentConfig(
         agent_id="test_001",
         container_name="test_container_001",
@@ -51,7 +51,7 @@ def test_container_lifecycle():
     )
     
     with ClaudeCodeWrapper(config) as wrapper:
-        # コンテナが作成されたことを確認
+        # Verify container was created
         result = wrapper.exec_in_container("echo 'Container is running'")
         assert result.exit_code == 0
         assert "Container is running" in result.stdout

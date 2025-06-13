@@ -143,7 +143,8 @@ class WorkspaceIsolationManager:
                 'WORKSPACE': '/workspace',
                 'CLAUDE_ENV': environment
             },
-            capabilities_add=['SYS_PTRACE'],  # For debugging
+            capabilities_drop=['ALL'],  # Drop all capabilities for security
+            capabilities_add=[],  # No capabilities added
             network_mode=self.podman_config.get('network', {}).get('name', 'bridge')
         )
         
@@ -210,18 +211,42 @@ class WorkspaceIsolationManager:
         for key, value in config.environment.items():
             cmd.extend(['-e', f"{key}={value}"])
         
-        # Add capabilities
-        for cap in config.capabilities_add:
-            cmd.extend(['--cap-add', cap])
+        # Add capabilities (security hardened)
         for cap in config.capabilities_drop:
             cmd.extend(['--cap-drop', cap])
+        for cap in config.capabilities_add:
+            cmd.extend(['--cap-add', cap])
         
-        # Add network
+        # Add comprehensive security options
+        cmd.extend(['--security-opt', 'no-new-privileges:true'])
+        cmd.extend(['--security-opt', 'seccomp=default'])
+        cmd.extend(['--read-only'])  # Read-only root filesystem
+        cmd.extend(['--tmpfs', '/tmp:rw,noexec,nosuid,size=100m'])
+        cmd.extend(['--tmpfs', '/var/tmp:rw,noexec,nosuid,size=50m'])
+        
+        # Resource limits and system restrictions
+        cmd.extend(['--ulimit', 'nproc=1024'])  # Limit number of processes
+        cmd.extend(['--ulimit', 'nofile=1024'])  # Limit open files
+        cmd.extend(['--ulimit', 'core=0'])  # Disable core dumps
+        cmd.extend(['--pids-limit', '100'])  # Limit PIDs
+        cmd.extend(['--oom-kill-disable=false'])  # Allow OOM killer
+        
+        # Network security
         cmd.extend(['--network', config.network_mode])
         
-        # Add security options
+        # User namespace and security context
         if self.podman_config.get('security', {}).get('userns'):
             cmd.extend(['--userns', self.podman_config['security']['userns']])
+        else:
+            cmd.extend(['--userns=keep-id'])  # Use current user namespace
+        
+        # Additional security options from config
+        security_config = self.podman_config.get('security', {})
+        if security_config.get('seccomp_profile'):
+            cmd.extend(['--security-opt', f"seccomp={security_config['seccomp_profile']}"])
+        
+        # Ensure container runs as non-root
+        cmd.extend(['--user', '1000:1000'])
         
         # Add work directory
         cmd.extend(['-w', '/workspace'])

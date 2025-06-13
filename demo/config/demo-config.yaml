@@ -1,5 +1,5 @@
 # Claude Conductor - Collaborative Development Demo Configuration
-# 4つの専門エージェントによる協調開発デモ
+# Collaborative development demo with 4 specialized agents
 
 # Orchestrator configuration
 orchestrator:

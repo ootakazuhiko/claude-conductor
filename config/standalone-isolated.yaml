@@ -74,13 +74,11 @@ isolated_workspace:
           - "source:/workspace/src"
           - "cache:/workspace/.cache"
     
-    # Container capabilities for development
+    # Container capabilities (security hardened)
     capabilities:
-      add:
-        - "SYS_PTRACE"  # For debugging
+      add: []  # No capabilities added for security
       drop:
-        - "NET_ADMIN"
-        - "SYS_ADMIN"
+        - "ALL"  # Drop all capabilities
     
     # Resource limits per agent container
     resources:

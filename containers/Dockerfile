@@ -61,11 +61,9 @@ RUN curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION}.x | bash - \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Create user and group
+# Create user and group (without sudo access for security)
 RUN groupadd -g ${CLAUDE_GID} ${CLAUDE_USER} \
     && useradd -m -u ${CLAUDE_UID} -g ${CLAUDE_GID} -s /bin/bash ${CLAUDE_USER} \
-    && usermod -aG sudo ${CLAUDE_USER} \
-    && echo "${CLAUDE_USER} ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers \
     && mkdir -p ${WORKSPACE_DIR} \
     && chown -R ${CLAUDE_USER}:${CLAUDE_USER} ${WORKSPACE_DIR}
 

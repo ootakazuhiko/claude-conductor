@@ -52,7 +52,7 @@ def create_standalone_architecture():
     
     # Core components
     components = [
-        (2.5, 5.8, 'Orchestrator\nタスク管理'),
+        (2.5, 5.8, 'Orchestrator\nTask Management'),
         (5.75, 5.8, 'Web Dashboard\nFastAPI'),
         (9, 5.8, 'API Server\nREST API')
     ]
@@ -117,8 +117,8 @@ def create_standalone_architecture():
     
     # Communication components
     comm_components = [
-        (7.5, 0.9, 'In-Memory Queue\nタスクキュー'),
-        (9.5, 0.9, 'Unix Socket\nエージェント通信')
+        (7.5, 0.9, 'In-Memory Queue\nTask Queue'),
+        (9.5, 0.9, 'Unix Socket\nAgent Communication')
     ]
     for x, y, text in comm_components:
         comm_rect = Rectangle((x-0.5, y-0.2), 1, 0.4,

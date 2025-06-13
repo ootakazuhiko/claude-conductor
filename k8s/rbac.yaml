@@ -26,43 +26,34 @@ metadata:
     app.kubernetes.io/name: claude-conductor
     app.kubernetes.io/component: orchestrator
 rules:
-# Pod management permissions
+# Restricted pod management - only for claude-conductor pods
 - apiGroups: [""]
   resources: ["pods"]
-  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-- apiGroups: [""]
-  resources: ["pods/exec"]
-  verbs: ["create"]
+  verbs: ["get", "list", "watch"]
+  resourceNames: []  # Will be restricted by namespace
 - apiGroups: [""]
   resources: ["pods/log"]
   verbs: ["get", "list"]
-# Service management
+# Read-only service access
 - apiGroups: [""]
   resources: ["services"]
-  verbs: ["get", "list", "watch"]
-# ConfigMap and Secret access
+  verbs: ["get", "list"]
+# Read-only ConfigMap access (no secrets for security)
 - apiGroups: [""]
-  resources: ["configmaps", "secrets"]
+  resources: ["configmaps"]
   verbs: ["get", "list", "watch"]
-# Deployment management for dynamic agent scaling
+# Limited deployment management - only for agent scaling
 - apiGroups: ["apps"]
-  resources: ["deployments", "replicasets"]
-  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-# StatefulSet management (if using stateful agents)
-- apiGroups: ["apps"]
-  resources: ["statefulsets"]
-  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-# Events for logging and monitoring
+  resources: ["deployments"]
+  verbs: ["get", "list", "watch", "patch"]
+  resourceNames: ["claude-conductor-agents"]  # Only specific deployment
+# Read-only events for monitoring
 - apiGroups: [""]
   resources: ["events"]
-  verbs: ["get", "list", "watch", "create"]
-# Node information for resource management
-- apiGroups: [""]
-  resources: ["nodes"]
-  verbs: ["get", "list", "watch"]
-# Metrics access
+  verbs: ["get", "list"]
+# Restricted metrics access
 - apiGroups: ["metrics.k8s.io"]
-  resources: ["pods", "nodes"]
+  resources: ["pods"]
   verbs: ["get", "list"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1

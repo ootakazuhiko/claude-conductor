@@ -19,7 +19,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class MessageType(Enum):
-    """メッセージタイプ"""
+    """Message types for agent communication"""
     TASK_REQUEST = "task_request"
     TASK_RESPONSE = "task_response"
     STATUS_UPDATE = "status_update"
@@ -29,7 +29,7 @@ class MessageType(Enum):
 
 @dataclass
 class AgentMessage:
-    """エージェント間メッセージ"""
+    """Inter-agent message data structure"""
     message_id: str
     sender_id: str
     receiver_id: str
@@ -50,7 +50,7 @@ class AgentMessage:
         return cls(**data)
 
 class UnixSocketChannel:
-    """Unix Socket を使った通信チャネル"""
+    """Communication channel using Unix sockets"""
     
     def __init__(self, socket_path: str, is_server: bool = False):
         self.socket_path = socket_path
@@ -58,7 +58,7 @@ class UnixSocketChannel:
         self.socket = None
         self.receive_queue = queue.Queue()
         self.is_running = False
-        self.clients = []  # サーバーモードでのクライアント管理
+        self.clients = []  # Client management in server mode
         
         if is_server:
             self._start_server()
@@ -66,7 +66,7 @@ class UnixSocketChannel:
             self._connect_client()
             
     def _start_server(self):
-        """サーバーソケットを開始"""
+        """Start server socket"""
         if os.path.exists(self.socket_path):
             os.unlink(self.socket_path)
             
@@ -79,7 +79,7 @@ class UnixSocketChannel:
         logger.info(f"Unix socket server started at {self.socket_path}")
         
     def _accept_connections(self):
-        """クライアント接続を受け付ける"""
+        """Accept client connections"""
         while self.is_running:
             try:
                 client_socket, _ = self.socket.accept()
@@ -94,7 +94,7 @@ class UnixSocketChannel:
                     logger.error(f"Accept error: {e}")
                     
     def _handle_client(self, client_socket):
-        """クライアントからのメッセージを処理"""
+        """Handle messages from client"""
         while self.is_running:
             try:
                 data = client_socket.recv(4096)
@@ -104,7 +104,7 @@ class UnixSocketChannel:
                 message = AgentMessage.from_json(data.decode())
                 self.receive_queue.put(message)
                 
-                # ブロードキャスト処理
+                # Broadcast processing
                 if message.receiver_id == "broadcast":
                     self._broadcast_message(message, exclude_socket=client_socket)
                     
@@ -116,7 +116,7 @@ class UnixSocketChannel:
         self.clients.remove(client_socket)
         
     def _broadcast_message(self, message: AgentMessage, exclude_socket=None):
-        """全クライアントにメッセージをブロードキャスト"""
+        """Broadcast message to all clients"""
         data = message.to_json().encode()
         for client in self.clients:
             if client != exclude_socket:
@@ -126,7 +126,7 @@ class UnixSocketChannel:
                     pass
                     
     def _connect_client(self):
-        """クライアントとして接続"""
+        """Connect as client"""
         self.socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self.socket.connect(self.socket_path)
         self.is_running = True
@@ -135,7 +135,7 @@ class UnixSocketChannel:
         logger.info(f"Connected to Unix socket at {self.socket_path}")
         
     def _receive_messages(self):
-        """メッセージを受信"""
+        """Receive messages"""
         while self.is_running:
             try:
                 data = self.socket.recv(4096)
@@ -150,7 +150,7 @@ class UnixSocketChannel:
                     logger.error(f"Receive error: {e}")
                     
     def send(self, message: AgentMessage):
-        """メッセージを送信"""
+        """Send message"""
         if not self.socket:
             raise Exception("Socket not connected")
             
@@ -158,14 +158,14 @@ class UnixSocketChannel:
         self.socket.sendall(data)
         
     def receive(self, timeout: Optional[float] = None) -> Optional[AgentMessage]:
-        """メッセージを受信"""
+        """Receive message"""
         try:
             return self.receive_queue.get(timeout=timeout)
         except queue.Empty:
             return None
             
     def close(self):
-        """接続を閉じる"""
+        """Close connection"""
         self.is_running = False
         if self.socket:
             self.socket.close()
@@ -173,7 +173,7 @@ class UnixSocketChannel:
             os.unlink(self.socket_path)
 
 class Agent2AgentProtocol:
-    """Agent2Agentプロトコルの実装"""
+    """Agent-to-Agent protocol implementation"""
     
     def __init__(self, agent_id: str, channel: UnixSocketChannel):
         self.agent_id = agent_id
@@ -183,7 +183,7 @@ class Agent2AgentProtocol:
         self.message_handlers: Dict[MessageType, Callable] = {}
         
     def register_handler(self, message_type: MessageType, handler: Callable):
-        """メッセージハンドラーを登録"""
+        """Register message handler"""
         self.message_handlers[message_type] = handler
         
     def send_task_request(
@@ -192,7 +192,7 @@ class Agent2AgentProtocol:
         task: Dict[str, Any],
         callback: Optional[Callable] = None
     ) -> str:
-        """タスクリクエストを送信"""
+        """Send task request"""
         message_id = f"{self.agent_id}_{int(time.time()*1000)}"
         
         message = AgentMessage(
@@ -216,7 +216,7 @@ class Agent2AgentProtocol:
         request_message: AgentMessage,
         result: Dict[str, Any]
     ):
-        """タスクレスポンスを送信"""
+        """Send task response"""
         response = AgentMessage(
             message_id=f"{self.agent_id}_{int(time.time()*1000)}",
             sender_id=self.agent_id,
@@ -230,7 +230,7 @@ class Agent2AgentProtocol:
         self.channel.send(response)
         
     def process_messages(self):
-        """受信メッセージを処理"""
+        """Process received messages"""
         message = self.channel.receive(timeout=0.1)
         if not message:
             return

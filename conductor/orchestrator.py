@@ -17,6 +17,11 @@ from datetime import datetime
 
 from .agent import ClaudeAgent, Task, TaskResult
 from .protocol import UnixSocketChannel
+from .exceptions import (
+    ConfigurationError, AgentStartupError, CommunicationError,
+    TaskExecutionError, TaskValidationError, TaskTimeoutError, ResourceError
+)
+from .error_handler import ErrorHandler, retry, CircuitBreaker
 
 logging.basicConfig(
     level=logging.INFO,
@@ -25,13 +30,16 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 class Orchestrator:
-    """マルチエージェントオーケストレーター"""
+    """Multi-agent orchestrator for Claude Conductor"""
     
     def __init__(self, config_path: Optional[str] = None):
-        # 設定読み込み
+        # Initialize error handler
+        self.error_handler = ErrorHandler("orchestrator")
+        
+        # Load configuration
         self.config = self._load_config(config_path)
         
-        # コンポーネント
+        # Components
         self.agents: Dict[str, ClaudeAgent] = {}
         self.executor = ThreadPoolExecutor(
             max_workers=self.config.get("max_workers", 10)
@@ -39,7 +47,7 @@ class Orchestrator:
         self.task_queue: List[Task] = []
         self.results: Dict[str, TaskResult] = {}
         
-        # 統計情報
+        # Statistics
         self.stats = {
             "tasks_completed": 0,
             "tasks_failed": 0,
@@ -47,12 +55,19 @@ class Orchestrator:
             "start_time": None
         }
         
-        # 通信用ソケット
+        # Communication socket
         self.broker_socket_path = "/tmp/claude_orchestrator.sock"
         self.broker_channel: Optional[UnixSocketChannel] = None
         
+        # Circuit breakers for external dependencies
+        self.agent_circuit_breaker = CircuitBreaker(
+            failure_threshold=3,
+            timeout=30.0,
+            expected_exception=AgentStartupError
+        )
+        
     def _load_config(self, config_path: Optional[str]) -> Dict[str, Any]:
-        """設定ファイルを読み込む"""
+        """Load configuration file with proper error handling"""
         default_config = {
             "num_agents": 3,
             "max_workers": 10,
@@ -60,119 +75,299 @@ class Orchestrator:
             "log_level": "INFO"
         }
         
-        if config_path and os.path.exists(config_path):
-            with open(config_path, 'r') as f:
-                try:
+        if config_path:
+            if not os.path.exists(config_path):
+                raise ConfigurationError(
+                    f"Configuration file not found: {config_path}",
+                    context={"config_path": config_path}
+                )
+            
+            try:
+                with open(config_path, 'r') as f:
                     user_config = yaml.safe_load(f)
                     if user_config:
                         default_config.update(user_config)
-                except yaml.YAMLError as e:
-                    logger.warning(f"Failed to parse config file: {e}")
+                    else:
+                        self.error_handler.handle_warning(
+                            "config_load",
+                            "Configuration file is empty, using defaults",
+                            {"config_path": config_path}
+                        )
+            except yaml.YAMLError as e:
+                self.error_handler.handle_error(
+                    "config_parse",
+                    ConfigurationError(f"Failed to parse config file: {e}", context={"config_path": config_path}),
+                    reraise=False
+                )
+            except IOError as e:
+                self.error_handler.handle_error(
+                    "config_read",
+                    ConfigurationError(f"Failed to read config file: {e}", context={"config_path": config_path}),
+                    reraise=False
+                )
                 
         return default_config
+    
+    @retry(max_attempts=3, retryable_exceptions=(AgentStartupError, ConnectionError))
+    def _start_agent_with_retry(self, agent_id: str) -> ClaudeAgent:
+        """Start agent with retry logic"""
+        try:
+            agent = ClaudeAgent(agent_id, self.broker_socket_path, self.config)
+            agent.start()
+            return agent
+        except Exception as e:
+            raise AgentStartupError(
+                f"Failed to start agent {agent_id}: {e}",
+                context={"agent_id": agent_id, "original_error": str(e)}
+            )
         
     def start(self):
-        """オーケストレーターを起動"""
+        """Start orchestrator with comprehensive error handling"""
+        self.error_handler.log_operation_start(
+            "orchestrator_start",
+            {"num_agents": self.config['num_agents']}
+        )
+        
         logger.info(f"Starting orchestrator with {self.config['num_agents']} agents")
         self.stats["start_time"] = time.time()
         
-        # ブローカーチャネル起動
+        # Start broker channel with proper error handling
         try:
             self.broker_channel = UnixSocketChannel(
                 self.broker_socket_path,
                 is_server=True
             )
+            self.error_handler.log_operation_success(
+                "broker_channel_start",
+                {"socket_path": self.broker_socket_path}
+            )
         except Exception as e:
-            logger.warning(f"Failed to start broker channel: {e}")
+            self.error_handler.handle_error(
+                "broker_channel_start",
+                CommunicationError(f"Failed to start broker channel: {e}", context={"socket_path": self.broker_socket_path}),
+                reraise=False
+            )
             self.broker_channel = None
         
-        # エージェントの起動
+        # Start agents with circuit breaker protection
         successful_agents = 0
+        failed_agents = []
+        
         for i in range(self.config["num_agents"]):
             agent_id = f"agent_{i:03d}"
-            agent = ClaudeAgent(agent_id, self.broker_socket_path)
             
             try:
-                agent.start()
+                agent = self._start_agent_with_retry(agent_id)
                 self.agents[agent_id] = agent
                 successful_agents += 1
-                logger.info(f"Agent {agent_id} added to orchestrator")
-                
-            except Exception as e:
-                logger.error(f"Failed to start agent {agent_id}: {e}")
+                self.error_handler.log_operation_success(
+                    "agent_start",
+                    {"agent_id": agent_id}
+                )
+            except AgentStartupError as e:
+                failed_agents.append(agent_id)
+                self.error_handler.handle_error(
+                    "agent_start",
+                    e,
+                    context={"agent_id": agent_id},
+                    reraise=False
+                )
+        
+        # Validate minimum agent requirements
+        min_agents = max(1, self.config["num_agents"] // 2)
+        if successful_agents < min_agents:
+            raise ResourceError(
+                f"Failed to start minimum required agents ({successful_agents}/{min_agents})",
+                context={
+                    "successful_agents": successful_agents,
+                    "failed_agents": failed_agents,
+                    "min_required": min_agents
+                }
+            )
                 
         logger.info(f"Orchestrator started with {successful_agents}/{self.config['num_agents']} active agents")
         
-        # 統計情報スレッド
+        # Start statistics reporter thread
         threading.Thread(target=self._stats_reporter, daemon=True).start()
         
+        self.error_handler.log_operation_success(
+            "orchestrator_start",
+            {
+                "successful_agents": successful_agents,
+                "failed_agents": len(failed_agents)
+            }
+        )
+        
     def stop(self):
-        """オーケストレーターを停止"""
+        """Stop orchestrator with proper cleanup"""
+        self.error_handler.log_operation_start("orchestrator_stop")
         logger.info("Stopping orchestrator")
         
-        # 全エージェントを停止
+        # Stop all agents with error handling
+        failed_stops = []
         for agent_id, agent in self.agents.items():
             try:
                 agent.stop()
-                logger.info(f"Agent {agent_id} stopped")
+                self.error_handler.log_operation_success(
+                    "agent_stop",
+                    {"agent_id": agent_id}
+                )
             except Exception as e:
-                logger.error(f"Error stopping agent {agent_id}: {e}")
+                failed_stops.append(agent_id)
+                self.error_handler.handle_error(
+                    "agent_stop",
+                    AgentError(f"Error stopping agent {agent_id}: {e}", context={"agent_id": agent_id}),
+                    reraise=False
+                )
                 
-        # ブローカーチャネルを閉じる
+        # Close broker channel
         if self.broker_channel:
-            self.broker_channel.close()
-            
-        # Executorをシャットダウン
-        self.executor.shutdown(wait=True)
+            try:
+                self.broker_channel.close()
+                self.error_handler.log_operation_success("broker_channel_close")
+            except Exception as e:
+                self.error_handler.handle_error(
+                    "broker_channel_close",
+                    CommunicationError(f"Error closing broker channel: {e}"),
+                    reraise=False
+                )
         
-        # 統計情報を出力
+        # Shutdown thread pool
+        try:
+            self.executor.shutdown(wait=True)
+            self.error_handler.log_operation_success("executor_shutdown")
+        except Exception as e:
+            self.error_handler.handle_error(
+                "executor_shutdown",
+                ResourceError(f"Error shutting down executor: {e}"),
+                reraise=False
+            )
+        
+        self.error_handler.log_operation_success(
+            "orchestrator_stop",
+            {"failed_agent_stops": len(failed_stops)}
+        )
+        
+        # Print final statistics
         self._print_final_stats()
         
         logger.info("Orchestrator stopped")
         
     def execute_task(self, task: Task) -> TaskResult:
-        """単一タスクを実行"""
-        # 優先度キューに追加（簡易実装）
-        self.task_queue.append(task)
-        self.task_queue.sort(key=lambda t: t.priority, reverse=True)
+        """Execute single task with comprehensive error handling"""
+        correlation_id = str(uuid.uuid4())
         
-        # 利用可能なエージェントを選択
-        agent = self._get_available_agent()
-        if not agent:
-            return TaskResult(
-                task_id=task.task_id,
-                agent_id="none",
-                status="failed",
-                result={},
-                error="No available agents"
-            )
-            
-        # タスクを実行
-        future = self.executor.submit(agent.execute_task, task)
+        self.error_handler.log_operation_start(
+            "task_execution",
+            {"task_id": task.task_id, "task_type": task.task_type},
+            correlation_id
+        )
         
         try:
-            result = future.result(timeout=task.timeout)
-        except TimeoutError:
-            result = TaskResult(
-                task_id=task.task_id,
-                agent_id=agent.agent_id,
-                status="timeout",
-                result={},
-                error="Task execution timeout"
-            )
+            # Validate task
+            if not task.task_id or not task.task_type:
+                raise TaskValidationError(
+                    "Task missing required fields",
+                    context={"task_id": getattr(task, 'task_id', None), "task_type": getattr(task, 'task_type', None)}
+                )
+            
+            # Add to priority queue
+            self.task_queue.append(task)
+            self.task_queue.sort(key=lambda t: t.priority, reverse=True)
+            
+            # Select available agent
+            agent = self._get_available_agent()
+            if not agent:
+                error_result = TaskResult(
+                    task_id=task.task_id,
+                    agent_id="none",
+                    status="failed",
+                    result={},
+                    error="No available agents"
+                )
+                
+                self.error_handler.handle_error(
+                    "task_execution",
+                    ResourceError("No available agents for task execution"),
+                    context={"task_id": task.task_id},
+                    correlation_id=correlation_id,
+                    reraise=False
+                )
+                
+                self._update_stats(error_result)
+                self.results[task.task_id] = error_result
+                return error_result
+            
+            # Execute task with timeout and error handling
+            future = self.executor.submit(agent.execute_task, task)
+            
+            try:
+                result = future.result(timeout=task.timeout)
+                self.error_handler.log_operation_success(
+                    "task_execution",
+                    {"task_id": task.task_id, "agent_id": agent.agent_id, "status": result.status},
+                    correlation_id
+                )
+            except TimeoutError:
+                future.cancel()  # Attempt to cancel if still running
+                result = TaskResult(
+                    task_id=task.task_id,
+                    agent_id=agent.agent_id,
+                    status="timeout",
+                    result={},
+                    error=f"Task execution timeout after {task.timeout}s"
+                )
+                
+                self.error_handler.handle_error(
+                    "task_execution",
+                    TaskTimeoutError(f"Task {task.task_id} timed out after {task.timeout}s"),
+                    context={"task_id": task.task_id, "agent_id": agent.agent_id, "timeout": task.timeout},
+                    correlation_id=correlation_id,
+                    reraise=False
+                )
+            except Exception as e:
+                result = TaskResult(
+                    task_id=task.task_id,
+                    agent_id=agent.agent_id,
+                    status="failed",
+                    result={},
+                    error=str(e)
+                )
+                
+                self.error_handler.handle_error(
+                    "task_execution",
+                    TaskExecutionError(f"Task {task.task_id} failed: {e}"),
+                    context={"task_id": task.task_id, "agent_id": agent.agent_id},
+                    correlation_id=correlation_id,
+                    reraise=False
+                )
+            
+            self._update_stats(result)
+            self.results[task.task_id] = result
+            return result
+            
         except Exception as e:
-            result = TaskResult(
-                task_id=task.task_id,
-                agent_id=agent.agent_id,
+            # Handle unexpected errors in task execution setup
+            error_result = TaskResult(
+                task_id=getattr(task, 'task_id', 'unknown'),
+                agent_id="orchestrator",
                 status="failed",
                 result={},
-                error=str(e)
+                error=f"Task setup failed: {e}"
             )
             
-        self._update_stats(result)
-        self.results[task.task_id] = result
-        
-        return result
+            self.error_handler.handle_error(
+                "task_execution",
+                e,
+                context={"task_id": getattr(task, 'task_id', 'unknown')},
+                correlation_id=correlation_id,
+                reraise=False
+            )
+            
+            self._update_stats(error_result)
+            if hasattr(task, 'task_id') and task.task_id:
+                self.results[task.task_id] = error_result
+            return error_result
         
     def execute_parallel_task(self, task: Task) -> List[TaskResult]:
         """並列タスクを実行"""

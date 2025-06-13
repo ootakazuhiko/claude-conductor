@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class AgentConfig:
-    """エージェント設定"""
+    """Agent configuration"""
     agent_id: str
     container_name: str
     work_dir: str
@@ -36,7 +36,7 @@ class AgentConfig:
     
 @dataclass
 class CommandResult:
-    """コマンド実行結果"""
+    """Command execution result"""
     command: str
     stdout: str
     stderr: str
@@ -45,15 +45,15 @@ class CommandResult:
 
 @dataclass
 class Task:
-    """タスク定義"""
+    """Task definition"""
     task_id: str
     task_type: str = "generic"
     description: str = ""
     files: List[str] = None
     parallel: bool = False
     subtasks: Optional[List[Dict[str, Any]]] = None
-    priority: int = 5  # 1-10, 10が最高
-    timeout: float = 300.0  # 5分
+    priority: int = 5  # 1-10, 10 is highest
+    timeout: float = 300.0  # 5 minutes
     
     def __post_init__(self):
         if self.files is None:
@@ -61,7 +61,7 @@ class Task:
 
 @dataclass
 class TaskResult:
-    """タスク実行結果"""
+    """Task execution result"""
     task_id: str
     agent_id: str
     status: str  # "success", "failed", "timeout", "partial"
@@ -75,7 +75,7 @@ class TaskResult:
             self.timestamp = time.time()
 
 class ClaudeCodeWrapper:
-    """Claude Codeプロセスのラッパー"""
+    """Wrapper for Claude Code processes"""
     
     def __init__(self, config: AgentConfig):
         self.config = config
@@ -86,13 +86,13 @@ class ClaudeCodeWrapper:
         self.is_running = False
         
     def setup_container(self) -> str:
-        """Podmanコンテナのセットアップ"""
+        """Set up Podman container"""
         logger.info(f"Setting up container for agent {self.config.agent_id}")
         
-        # 既存コンテナのクリーンアップ
+        # Clean up existing container
         self._cleanup_existing_container()
         
-        # コンテナ作成コマンド
+        # Container creation command
         cmd = [
             "podman", "run", "-d",
             "--name", self.config.container_name,
@@ -113,10 +113,10 @@ class ClaudeCodeWrapper:
             self.container_id = result.stdout.strip()
             logger.info(f"Container created: {self.container_id[:12]}")
             
-            # 基本ツールのインストール
+            # Install basic tools
             self._install_base_tools()
             
-            # Claude Codeのインストール
+            # Install Claude Code
             self._install_claude_code()
             
             return self.container_id
@@ -126,14 +126,14 @@ class ClaudeCodeWrapper:
             raise
             
     def _cleanup_existing_container(self):
-        """既存のコンテナをクリーンアップ"""
+        """Clean up existing container"""
         subprocess.run(
             ["podman", "rm", "-f", self.config.container_name],
             capture_output=True
         )
         
     def _install_base_tools(self):
-        """基本ツールのインストール"""
+        """Install basic tools"""
         commands = [
             "apt-get update",
             "apt-get install -y curl git python3 python3-pip nodejs npm",
@@ -145,9 +145,9 @@ class ClaudeCodeWrapper:
                 logger.warning(f"Command failed: {cmd}")
                 
     def _install_claude_code(self):
-        """コンテナ内にClaude Codeをセットアップ"""
-        # TODO: 実際のClaude Codeインストール手順に置き換える
-        # 現在はダミースクリプトを配置
+        """Set up Claude Code in container"""
+        # TODO: Replace with actual Claude Code installation procedure
+        # Currently placing dummy script
         dummy_script = '''#!/usr/bin/env python3
 import sys
 import json
@@ -181,12 +181,12 @@ if "--headless" in sys.argv:
             break
 '''
         
-        # ダミースクリプトを作成
+        # Create dummy script
         self.exec_in_container(f"cat > /usr/local/bin/claude-code << 'EOF'\n{dummy_script}\nEOF")
         self.exec_in_container("chmod +x /usr/local/bin/claude-code")
             
     def exec_in_container(self, command: str) -> CommandResult:
-        """コンテナ内でコマンドを実行"""
+        """Execute command in container"""
         cmd = ["podman", "exec", self.config.container_name, "bash", "-c", command]
         
         result = subprocess.run(cmd, capture_output=True, text=True)
@@ -200,15 +200,15 @@ if "--headless" in sys.argv:
         )
         
     def start_claude_code(self, headless: bool = True):
-        """Claude Codeプロセスを開始"""
+        """Start Claude Code process"""
         logger.info(f"Starting Claude Code for agent {self.config.agent_id}")
         
-        # Claude Codeの実行コマンド
+        # Claude Code execution command
         claude_cmd = "claude-code"
         if headless:
             claude_cmd += " --headless"
             
-        # プロセスを開始
+        # Start process
         cmd = [
             "podman", "exec", "-i",
             self.config.container_name,
@@ -226,11 +226,11 @@ if "--headless" in sys.argv:
         
         self.is_running = True
         
-        # 出力読み取りスレッドを開始
+        # Start output reading threads
         self._start_output_readers()
         
     def _start_output_readers(self):
-        """stdout/stderrの読み取りスレッドを開始"""
+        """Start stdout/stderr reading threads"""
         def read_stdout():
             while self.is_running and self.process:
                 try:
@@ -253,7 +253,7 @@ if "--headless" in sys.argv:
         threading.Thread(target=read_stderr, daemon=True).start()
         
     def send_command(self, command: str):
-        """Claude Codeにコマンドを送信"""
+        """Send command to Claude Code"""
         if not self.process or not self.is_running:
             raise Exception("Claude Code is not running")
             
@@ -262,7 +262,7 @@ if "--headless" in sys.argv:
         self.process.stdin.flush()
         
     def read_output(self, timeout: float = 1.0) -> List[tuple]:
-        """出力を読み取る"""
+        """Read output"""
         outputs = []
         deadline = time.time() + timeout
         
@@ -279,7 +279,7 @@ if "--headless" in sys.argv:
         return outputs
         
     def stop(self):
-        """プロセスを停止"""
+        """Stop process"""
         logger.info(f"Stopping agent {self.config.agent_id}")
         self.is_running = False
         
@@ -291,7 +291,7 @@ if "--headless" in sys.argv:
                 self.process.kill()
                 
     def cleanup_container(self):
-        """コンテナをクリーンアップ"""
+        """Clean up container"""
         if self.container_id:
             subprocess.run(["podman", "stop", self.config.container_name], capture_output=True)
             subprocess.run(["podman", "rm", self.config.container_name], capture_output=True)
@@ -306,7 +306,7 @@ if "--headless" in sys.argv:
         self.cleanup_container()
 
 class ClaudeAgent:
-    """Claude Codeエージェント"""
+    """Claude Code agent"""
     
     def __init__(self, agent_id: str, orchestrator_socket_path: str = "/tmp/claude_orchestrator.sock",
                  config: Optional[Dict[str, Any]] = None):
@@ -314,11 +314,11 @@ class ClaudeAgent:
         self.orchestrator_socket_path = orchestrator_socket_path
         self.full_config = config or {}
         
-        # 隔離ワークスペースの設定を確認
+        # Check isolated workspace configuration
         isolated_config = self.full_config.get('isolated_workspace', {})
         use_isolation = isolated_config.get('enabled', False)
         
-        # Podmanコンテナ設定
+        # Podman container configuration
         self.config = AgentConfig(
             agent_id=agent_id,
             container_name=f"claude_agent_{agent_id}",
@@ -328,59 +328,59 @@ class ClaudeAgent:
             enable_snapshots=isolated_config.get('mode', 'sandbox') == 'sandbox'
         )
         
-        # コンポーネント
+        # Components
         self.wrapper: Optional[ClaudeCodeWrapper] = None
         self.protocol: Optional[Agent2AgentProtocol] = None
         self.channel: Optional[UnixSocketChannel] = None
         self.workspace_manager: Optional[WorkspaceIsolationManager] = None
         self.isolated_container: Optional[WorkspaceContainer] = None
         
-        # 状態
+        # State
         self.is_running = False
         self.current_task: Optional[Task] = None
         self.health_check_failed = 0
         
     def start(self):
-        """エージェントを起動"""
+        """Start agent"""
         logger.info(f"Starting agent {self.agent_id}")
         
         try:
-            # 隔離ワークスペースの設定
+            # Set up isolated workspace
             if self.config.use_isolated_workspace:
                 asyncio.run(self._setup_isolated_workspace())
             else:
-                # 通常のワークスペース作成
+                # Create normal workspace
                 os.makedirs(self.config.work_dir, exist_ok=True)
                 
-                # Wrapperの初期化
+                # Initialize wrapper
                 self.wrapper = ClaudeCodeWrapper(self.config)
                 self.wrapper.setup_container()
             
-            # 通信チャネルの初期化
+            # Initialize communication channel
             try:
                 self.channel = UnixSocketChannel(self.orchestrator_socket_path, is_server=False)
                 self.protocol = Agent2AgentProtocol(self.agent_id, self.channel)
                 
-                # メッセージハンドラー登録
+                # Register message handler
                 self.protocol.register_handler(
                     MessageType.TASK_REQUEST,
                     self._handle_task_request
                 )
             except Exception as e:
                 logger.warning(f"Failed to connect to orchestrator: {e}")
-                # オーケストレーターに接続できない場合はスタンドアローンモードで動作
+                # Run in standalone mode if unable to connect to orchestrator
                 self.channel = None
                 self.protocol = None
             
-            # Claude Code起動
+            # Start Claude Code
             self.wrapper.start_claude_code(headless=True)
             self.is_running = True
             
-            # メッセージ処理スレッド
+            # Message processing thread
             if self.protocol:
                 threading.Thread(target=self._process_messages, daemon=True).start()
             
-            # ヘルスチェックスレッド
+            # Health check thread
             threading.Thread(target=self._health_check_loop, daemon=True).start()
             
             logger.info(f"Agent {self.agent_id} started successfully")
@@ -390,7 +390,7 @@ class ClaudeAgent:
             raise
             
     def stop(self):
-        """エージェントを停止"""
+        """Stop agent"""
         logger.info(f"Stopping agent {self.agent_id}")
         self.is_running = False
         
@@ -405,14 +405,14 @@ class ClaudeAgent:
             self.channel.close()
             
     def execute_task(self, task: Task) -> TaskResult:
-        """タスクを実行"""
+        """Execute task"""
         self.current_task = task
         start_time = time.time()
         
         try:
             logger.info(f"Agent {self.agent_id} executing task {task.task_id}")
             
-            # タスクタイプに応じた処理
+            # Process according to task type
             if task.task_type == "code_review":
                 result = self._execute_code_review(task)
             elif task.task_type == "refactor":
@@ -450,22 +450,22 @@ class ClaudeAgent:
             self.current_task = None
             
     def _execute_code_review(self, task: Task) -> Dict[str, Any]:
-        """コードレビュータスクの実行"""
+        """Execute code review task"""
         results = {}
         total_issues = 0
         
         for file_path in task.files:
-            # ファイルをコンテナにコピー
+            # Copy file to container
             self._copy_file_to_container(file_path)
             
-            # レビューコマンド送信
+            # Send review command
             command = f"review {os.path.basename(file_path)}"
             self.wrapper.send_command(command)
             
-            # 結果を収集
+            # Collect results
             outputs = self.wrapper.read_output(timeout=10.0)
             
-            # 結果をパース
+            # Parse results
             review_result = self._parse_review_output(outputs)
             results[file_path] = review_result
             total_issues += review_result.get("issues", 0)
@@ -477,19 +477,19 @@ class ClaudeAgent:
         }
         
     def _execute_refactor(self, task: Task) -> Dict[str, Any]:
-        """リファクタリングタスクの実行"""
-        # ファイルをコンテナにコピー
+        """Execute refactoring task"""
+        # Copy files to container
         for file_path in task.files:
             self._copy_file_to_container(file_path)
             
-        # リファクタリングコマンド
+        # Refactoring command
         command = f"refactor {' '.join([os.path.basename(f) for f in task.files])}"
         if task.description:
             command += f" --description '{task.description}'"
             
         self.wrapper.send_command(command)
         
-        # 結果を収集
+        # Collect results
         outputs = self.wrapper.read_output(timeout=30.0)
         
         return {
@@ -499,7 +499,7 @@ class ClaudeAgent:
         }
         
     def _execute_test_generation(self, task: Task) -> Dict[str, Any]:
-        """テスト生成タスクの実行"""
+        """Execute test generation task"""
         results = {}
         total_tests = 0
         
@@ -521,7 +521,7 @@ class ClaudeAgent:
         }
         
     def _execute_analysis(self, task: Task) -> Dict[str, Any]:
-        """分析タスクの実行"""
+        """Execute analysis task"""
         command = f"analyze {task.description}"
         self.wrapper.send_command(command)
         
@@ -533,7 +533,7 @@ class ClaudeAgent:
         }
         
     def _execute_generic_task(self, task: Task) -> Dict[str, Any]:
-        """汎用タスクの実行"""
+        """Execute generic task"""
         command = task.description
         self.wrapper.send_command(command)
         
@@ -542,10 +542,10 @@ class ClaudeAgent:
         return {"output": self._format_output(outputs)}
         
     def _handle_task_request(self, message: AgentMessage):
-        """他のエージェントからのタスクリクエストを処理"""
+        """Handle task request from other agents"""
         logger.info(f"Agent {self.agent_id} received task request from {message.sender_id}")
         
-        # タスクを作成
+        # Create task
         task_data = message.payload
         task = Task(
             task_id=task_data.get("task_id", "unknown"),
@@ -558,15 +558,15 @@ class ClaudeAgent:
             timeout=task_data.get("timeout", 300.0)
         )
         
-        # タスクを実行
+        # Execute task
         result = self.execute_task(task)
         
-        # レスポンスを送信
+        # Send response
         if self.protocol:
             self.protocol.send_task_response(message, asdict(result))
         
     def _copy_file_to_container(self, file_path: str):
-        """ファイルをコンテナにコピー"""
+        """Copy file to container"""
         if os.path.exists(file_path):
             dest_path = os.path.join(self.config.work_dir, os.path.basename(file_path))
             try:
@@ -577,7 +577,7 @@ class ClaudeAgent:
                 logger.error(f"Failed to copy file {file_path}: {e}")
             
     def _parse_review_output(self, outputs: List[tuple]) -> Dict[str, Any]:
-        """レビュー出力をパース"""
+        """Parse review output"""
         text = "\n".join([line for _, line in outputs])
         try:
             return json.loads(text)
@@ -585,7 +585,7 @@ class ClaudeAgent:
             return {"raw_output": text, "issues": 0}
             
     def _parse_test_output(self, outputs: List[tuple]) -> Dict[str, Any]:
-        """テスト生成出力をパース"""
+        """Parse test generation output"""
         text = "\n".join([line for _, line in outputs])
         try:
             return json.loads(text)
@@ -593,11 +593,11 @@ class ClaudeAgent:
             return {"raw_output": text, "test_count": 0}
             
     def _format_output(self, outputs: List[tuple]) -> str:
-        """出力をフォーマット"""
+        """Format output"""
         return "\n".join([f"[{stream}] {line}" for stream, line in outputs])
         
     def _process_messages(self):
-        """メッセージを処理"""
+        """Process messages"""
         while self.is_running:
             try:
                 if self.protocol:
@@ -607,12 +607,12 @@ class ClaudeAgent:
                 logger.error(f"Message processing error: {e}")
                 
     def _health_check_loop(self):
-        """定期的なヘルスチェック"""
+        """Periodic health check"""
         while self.is_running:
-            time.sleep(30)  # 30秒ごと
+            time.sleep(30)  # Every 30 seconds
             
             try:
-                # 簡単なコマンドを送信してレスポンスを確認
+                # Send simple command and check response
                 if self.wrapper and self.wrapper.is_running:
                     self.wrapper.send_command("echo health_check")
                     outputs = self.wrapper.read_output(timeout=5.0)
@@ -624,30 +624,30 @@ class ClaudeAgent:
                         
                     if self.health_check_failed > 3:
                         logger.error(f"Agent {self.agent_id} health check failed")
-                        # TODO: 自動復旧処理
+                        # TODO: Auto-recovery process
                         
             except Exception as e:
                 logger.error(f"Health check error: {e}")
                 self.health_check_failed += 1
     
     async def _setup_isolated_workspace(self):
-        """隔離されたワークスペースをセットアップ"""
+        """Set up isolated workspace"""
         logger.info(f"Setting up isolated workspace for agent {self.agent_id}")
         
-        # ワークスペースマネージャーの初期化
+        # Initialize workspace manager
         self.workspace_manager = WorkspaceIsolationManager(self.full_config)
         
-        # 環境名の決定
+        # Determine environment name
         env_name = self.config.workspace_environment
         if self.current_task and hasattr(self.current_task, 'environment'):
             env_name = self.current_task.environment
         
-        # ワークスペースコンテナの作成
+        # Create workspace container
         self.isolated_container = await self.workspace_manager.create_workspace(
             self.agent_id, env_name
         )
         
-        # スナップショットの作成（有効な場合）
+        # Create snapshot (if enabled)
         if self.config.enable_snapshots:
             await self.workspace_manager.create_snapshot(
                 self.agent_id, "initial"
@@ -656,22 +656,22 @@ class ClaudeAgent:
         logger.info(f"Isolated workspace created: {self.isolated_container.container_id}")
     
     async def _cleanup_isolated_workspace(self):
-        """隔離されたワークスペースをクリーンアップ"""
+        """Clean up isolated workspace"""
         if self.workspace_manager and self.isolated_container:
-            # タスク失敗時の処理
+            # Handle task failure case
             if self.current_task and self.config.enable_snapshots:
                 if self.full_config.get('task_execution', {}).get('isolation', {}).get('preserve_on_error', True):
                     logger.info(f"Preserving workspace for debugging: {self.agent_id}")
                     return
             
-            # クリーンアップ
+            # Cleanup
             await self.workspace_manager.cleanup_workspace(
                 self.agent_id, 
                 preserve_volumes=False
             )
     
     async def execute_in_isolated_workspace(self, command: List[str]) -> Tuple[int, str, str]:
-        """隔離されたワークスペースでコマンドを実行"""
+        """Execute command in isolated workspace"""
         if not self.workspace_manager or not self.isolated_container:
             raise RuntimeError("Isolated workspace not initialized")
         
@@ -680,18 +680,18 @@ class ClaudeAgent:
         )
     
     def _execute_isolated_task(self, task: Task) -> Dict[str, Any]:
-        """隔離されたワークスペースでタスクを実行"""
+        """Execute task in isolated workspace"""
         if not self.config.use_isolated_workspace:
             return self._execute_generic_task(task)
         
         try:
-            # タスク前のスナップショット
+            # Pre-task snapshot
             if self.config.enable_snapshots:
                 asyncio.run(self.workspace_manager.create_snapshot(
                     self.agent_id, f"pre-task-{task.task_id}"
                 ))
             
-            # コマンドの実行
+            # Execute commands
             commands = []
             if hasattr(task, 'commands'):
                 commands = task.commands
@@ -717,7 +717,7 @@ class ClaudeAgent:
                 })
                 
                 if exit_code != 0:
-                    # エラー時の処理
+                    # Handle error case
                     if self.config.enable_snapshots and \
                        self.full_config.get('task_execution', {}).get('isolation', {}).get('restore_on_error', True):
                         asyncio.run(self.workspace_manager.restore_snapshot(
@@ -725,13 +725,13 @@ class ClaudeAgent:
                         ))
                     break
             
-            # タスク後のスナップショット（成功時）
+            # Post-task snapshot (on success)
             if all(r['exit_code'] == 0 for r in results) and self.config.enable_snapshots:
                 asyncio.run(self.workspace_manager.create_snapshot(
                     self.agent_id, f"post-task-{task.task_id}"
                 ))
             
-            # ワークスペース情報の取得
+            # Get workspace information
             workspace_info = self.workspace_manager.get_workspace_info(self.agent_id)
             
             return {

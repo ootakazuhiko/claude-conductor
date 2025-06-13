@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Claude Code Wrapper - ヘッドレスモード動作確認とプロセス制御
+Claude Code Wrapper - Headless mode operation and process control
 """
 
 import subprocess
@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class AgentConfig:
-    """エージェント設定"""
+    """Agent configuration"""
     agent_id: str
     container_name: str
     work_dir: str
@@ -29,7 +29,7 @@ class AgentConfig:
     
 @dataclass
 class CommandResult:
-    """コマンド実行結果"""
+    """Command execution result"""
     command: str
     stdout: str
     stderr: str
@@ -37,7 +37,7 @@ class CommandResult:
     timestamp: float
 
 class ClaudeCodeWrapper:
-    """Claude Codeプロセスのラッパー"""
+    """Wrapper for Claude Code processes"""
     
     def __init__(self, config: AgentConfig):
         self.config = config
@@ -48,13 +48,13 @@ class ClaudeCodeWrapper:
         self.is_running = False
         
     def setup_container(self) -> str:
-        """Podmanコンテナのセットアップ"""
+        """Set up Podman container"""
         logger.info(f"Setting up container for agent {self.config.agent_id}")
         
-        # 既存コンテナのクリーンアップ
+        # Clean up existing container
         self._cleanup_existing_container()
         
-        # コンテナ作成コマンド
+        # Container creation command
         cmd = [
             "podman", "run", "-d",
             "--name", self.config.container_name,
@@ -75,10 +75,10 @@ class ClaudeCodeWrapper:
             self.container_id = result.stdout.strip()
             logger.info(f"Container created: {self.container_id[:12]}")
             
-            # 基本ツールのインストール
+            # Install basic tools
             self._install_base_tools()
             
-            # Claude Codeのインストール
+            # Install Claude Code
             self._install_claude_code()
             
             return self.container_id
@@ -88,14 +88,14 @@ class ClaudeCodeWrapper:
             raise
             
     def _cleanup_existing_container(self):
-        """既存のコンテナをクリーンアップ"""
+        """Clean up existing container"""
         subprocess.run(
             ["podman", "rm", "-f", self.config.container_name],
             capture_output=True
         )
         
     def _install_base_tools(self):
-        """基本ツールのインストール"""
+        """Install basic tools"""
         commands = [
             "apt-get update",
             "apt-get install -y curl git python3 python3-pip",
@@ -107,9 +107,9 @@ class ClaudeCodeWrapper:
                 logger.warning(f"Command failed: {cmd}")
                 
     def _install_claude_code(self):
-        """コンテナ内にClaude Codeをセットアップ"""
-        # TODO: 実際のClaude Codeインストール手順に置き換える
-        # 現在はダミースクリプトを配置
+        """Set up Claude Code in container"""
+        # TODO: Replace with actual Claude Code installation procedure
+        # Currently placing dummy script
         dummy_script = '''#!/usr/bin/env python3
 import sys
 import json
@@ -139,12 +139,12 @@ if "--headless" in sys.argv:
             break
 '''
         
-        # ダミースクリプトを作成
+        # Create dummy script
         self.exec_in_container(f"cat > /usr/local/bin/claude-code << 'EOF'\n{dummy_script}\nEOF")
         self.exec_in_container("chmod +x /usr/local/bin/claude-code")
             
     def exec_in_container(self, command: str) -> CommandResult:
-        """コンテナ内でコマンドを実行"""
+        """Execute command in container"""
         cmd = ["podman", "exec", self.config.container_name, "bash", "-c", command]
         
         result = subprocess.run(cmd, capture_output=True, text=True)
@@ -158,15 +158,15 @@ if "--headless" in sys.argv:
         )
         
     def start_claude_code(self, headless: bool = True):
-        """Claude Codeプロセスを開始"""
+        """Start Claude Code process"""
         logger.info(f"Starting Claude Code for agent {self.config.agent_id}")
         
-        # Claude Codeの実行コマンド
+        # Claude Code execution command
         claude_cmd = "claude-code"
         if headless:
             claude_cmd += " --headless"
             
-        # プロセスを開始
+        # Start process
         cmd = [
             "podman", "exec", "-i",
             self.config.container_name,
@@ -184,11 +184,11 @@ if "--headless" in sys.argv:
         
         self.is_running = True
         
-        # 出力読み取りスレッドを開始
+        # Start output reading threads
         self._start_output_readers()
         
     def _start_output_readers(self):
-        """stdout/stderrの読み取りスレッドを開始"""
+        """Start stdout/stderr reading threads"""
         def read_stdout():
             while self.is_running and self.process:
                 try:
@@ -211,7 +211,7 @@ if "--headless" in sys.argv:
         threading.Thread(target=read_stderr, daemon=True).start()
         
     def send_command(self, command: str):
-        """Claude Codeにコマンドを送信"""
+        """Send command to Claude Code"""
         if not self.process or not self.is_running:
             raise Exception("Claude Code is not running")
             
@@ -220,7 +220,7 @@ if "--headless" in sys.argv:
         self.process.stdin.flush()
         
     def read_output(self, timeout: float = 1.0) -> List[tuple]:
-        """出力を読み取る"""
+        """Read output"""
         outputs = []
         deadline = time.time() + timeout
         
@@ -237,7 +237,7 @@ if "--headless" in sys.argv:
         return outputs
         
     def stop(self):
-        """プロセスを停止"""
+        """Stop process"""
         logger.info(f"Stopping agent {self.config.agent_id}")
         self.is_running = False
         
@@ -249,7 +249,7 @@ if "--headless" in sys.argv:
                 self.process.kill()
                 
     def cleanup_container(self):
-        """コンテナをクリーンアップ"""
+        """Clean up container"""
         if self.container_id:
             subprocess.run(["podman", "stop", self.config.container_name])
             subprocess.run(["podman", "rm", self.config.container_name])

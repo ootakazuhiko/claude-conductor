@@ -1,0 +1,120 @@
+apiVersion: policy/v1beta1
+kind: PodSecurityPolicy
+metadata:
+  name: claude-conductor-psp
+  labels:
+    app.kubernetes.io/name: claude-conductor
+    app.kubernetes.io/component: security-policy
+spec:
+  # Prevent privilege escalation
+  privileged: false
+  allowPrivilegeEscalation: false
+  
+  # Require non-root user
+  runAsUser:
+    rule: 'MustRunAsNonRoot'
+  
+  # Require specific user/group IDs
+  runAsGroup:
+    rule: 'MustRunAs'
+    ranges:
+    - min: 1000
+      max: 1000
+  
+  # Supplemental groups
+  supplementalGroups:
+    rule: 'MustRunAs'
+    ranges:
+    - min: 1000
+      max: 1000
+  
+  # FSGroup for volume ownership
+  fsGroup:
+    rule: 'MustRunAs'
+    ranges:
+    - min: 1000
+      max: 1000
+  
+  # Seccomp profile
+  seccomp:
+    rule: 'MustRunAs'
+    allowedProfiles:
+    - 'runtime/default'
+  
+  # AppArmor (if supported)
+  annotations:
+    apparmor.security.beta.kubernetes.io/allowedProfileNames: 'runtime/default'
+    apparmor.security.beta.kubernetes.io/defaultProfileName: 'runtime/default'
+  
+  # Required drop capabilities
+  requiredDropCapabilities:
+  - ALL
+  
+  # Forbidden capabilities
+  allowedCapabilities: []
+  
+  # Volume restrictions
+  volumes:
+  - 'configMap'
+  - 'emptyDir'
+  - 'projected'
+  - 'secret'
+  - 'downwardAPI'
+  - 'persistentVolumeClaim'
+  
+  # Forbidden volume types
+  forbiddenSysctls:
+  - '*'
+  
+  # Host restrictions
+  hostNetwork: false
+  hostIPC: false
+  hostPID: false
+  hostPorts: []
+  
+  # File system restrictions
+  readOnlyRootFilesystem: true
+  
+  # Allow specific host paths (none for security)
+  allowedHostPaths: []
+  
+  # SELinux (if enabled)
+  seLinux:
+    rule: 'RunAsAny'
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: claude-conductor-psp-user
+  namespace: claude-conductor
+  labels:
+    app.kubernetes.io/name: claude-conductor
+    app.kubernetes.io/component: psp-role
+rules:
+- apiGroups: ['policy']
+  resources: ['podsecuritypolicies']
+  verbs: ['use']
+  resourceNames:
+  - claude-conductor-psp
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: claude-conductor-psp-binding
+  namespace: claude-conductor
+  labels:
+    app.kubernetes.io/name: claude-conductor
+    app.kubernetes.io/component: psp-binding
+roleRef:
+  kind: Role
+  name: claude-conductor-psp-user
+  apiGroup: rbac.authorization.k8s.io
+subjects:
+- kind: ServiceAccount
+  name: claude-conductor-orchestrator
+  namespace: claude-conductor
+- kind: ServiceAccount
+  name: claude-conductor-agent
+  namespace: claude-conductor

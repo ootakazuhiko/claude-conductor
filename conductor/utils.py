@@ -206,6 +206,12 @@ def check_container_runtime() -> Optional[str]:
     return None
 
 
+def get_timestamp() -> str:
+    """Get current timestamp in ISO format suitable for filenames"""
+    from datetime import datetime
+    return datetime.now().strftime("%Y%m%d_%H%M%S")
+
+
 def generate_unique_id(prefix: str = "") -> str:
     """Generate unique identifier"""
     timestamp = str(time.time())

@@ -12,13 +12,23 @@ services:
         NODE_VERSION: "18"
     container_name: claude-conductor
     restart: unless-stopped
+    user: "1000:1000"
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+      - seccomp:default
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=100m
+      - /var/tmp:rw,noexec,nosuid,size=50m
     volumes:
-      - conductor_workspace:/workspace
-      - conductor_logs:/var/log/conductor
-      - conductor_config:/home/claude/.conductor
-      - shared_sockets:/shared/sockets
-      # Mount container runtime socket for managing agents
-      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - conductor_workspace:/workspace:rw
+      - conductor_logs:/var/log/conductor:rw
+      - conductor_config:/home/claude/.conductor:rw
+      - shared_sockets:/shared/sockets:rw
+      # WARNING: Docker socket mount removed for security
+      # Use Podman API or separate orchestration service instead
     environment:
       - CONDUCTOR_MODE=production
       - CONDUCTOR_LOG_LEVEL=INFO
@@ -104,9 +114,9 @@ services:
       target: development
     container_name: claude-conductor-dev
     volumes:
-      - ..:/app
-      - conductor_dev_workspace:/workspace
-      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ..:/app:ro  # Read-only source mount for security
+      - conductor_dev_workspace:/workspace:rw
+      # WARNING: Docker socket mount removed for security
     environment:
       - CONDUCTOR_MODE=development
       - CONDUCTOR_LOG_LEVEL=DEBUG
