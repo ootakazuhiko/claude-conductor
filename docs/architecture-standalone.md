@@ -202,46 +202,46 @@ graph TB
         ArgoCD[ArgoCD<br/>GitOps]
     end
     
-    Users -->["HTTPS"] CloudProvider
-    CloudProvider -->["Load Balancer"] Ingress
+    Users --> CloudProvider
+    CloudProvider --> Ingress
     Ingress --> TLS
     TLS --> DashboardPod
     TLS --> APIPod
     
-    GitHub -->["Webhook"] GitHubActions
-    GitHubActions -->["Build & Push"] DockerHub
-    GitHubActions -->["Deploy"] ArgoCD
-    ArgoCD -->["Sync"] OrchestratorPod
-    ArgoCD -->["Sync"] AgentRS
+    GitHub --> GitHubActions
+    GitHubActions --> DockerHub
+    GitHubActions --> ArgoCD
+    ArgoCD --> OrchestratorPod
+    ArgoCD --> AgentRS
     
-    OrchestratorPod <-->["gRPC"] ServiceMesh
-    DashboardPod <-->["HTTP"] ServiceMesh
-    APIPod <-->["REST"] ServiceMesh
-    AgentRS <-->["gRPC"] ServiceMesh
+    OrchestratorPod <--> ServiceMesh
+    DashboardPod <--> ServiceMesh
+    APIPod <--> ServiceMesh
+    AgentRS <--> ServiceMesh
     
     ServiceMesh --> mTLS
     
-    OrchestratorPod -->["Read/Write"] Redis
-    OrchestratorPod -->["Read/Write"] PostgreSQL
-    AgentRS -->["Read/Write"] S3
+    OrchestratorPod --> Redis
+    OrchestratorPod --> PostgreSQL
+    AgentRS --> S3
     
     OrchestratorPod --> PVC1
     AgentRS --> PVC1
     OrchestratorPod --> PVC2
     OrchestratorPod --> PVC3
     
-    HPA -->["Scale"] AgentRS
-    HPA <--["Metrics"] Prometheus
+    HPA --> AgentRS
+    HPA <-- Prometheus
     
-    OrchestratorPod -->["Metrics"] Prometheus
-    AgentRS -->["Metrics"] Prometheus
+    OrchestratorPod --> Prometheus
+    AgentRS --> Prometheus
     Prometheus --> Grafana
     
-    OrchestratorPod -->["Logs"] Loki
-    AgentRS -->["Logs"] Loki
+    OrchestratorPod --> Loki
+    AgentRS --> Loki
     Loki --> Grafana
     
-    ServiceMesh -->["Traces"] Jaeger
+    ServiceMesh --> Jaeger
     
     style Users fill:#e1f5fe
     style Ingress fill:#ffccbc
