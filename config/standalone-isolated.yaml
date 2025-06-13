@@ -1,0 +1,258 @@
+# Claude Conductor - Standalone Configuration with Isolated Workspaces
+# Enhanced version with Podman-based independent development environments
+
+# Core settings
+num_agents: 2
+max_workers: 4
+task_timeout: 300  # Increased for container operations
+log_level: "INFO"
+
+# Agent configuration with isolation
+agent_config:
+  startup_delay: 10  # Increased for container initialization
+  health_check_interval: 30
+  max_memory_usage: "2g"
+  max_cpu_usage: "1.0"
+  workspace_isolation: "podman"  # Enable Podman-based isolation
+
+# Container configuration for agents
+container_config:
+  runtime: "podman"  # Use Podman instead of Docker
+  image: "ubuntu:22.04"
+  memory_limit: "2g"
+  cpu_limit: "1.0"
+  enable_networking: true  # Enable for development environments
+  workspace_mount: true
+  privileged: false
+  security_opts:
+    - "no-new-privileges"
+    - "label=disable"  # For development flexibility
+
+# Isolated workspace configuration
+isolated_workspace:
+  enabled: true
+  mode: "sandbox"  # sandbox | shared | hybrid
+  
+  # Each agent gets its own development container
+  agent_containers:
+    base_image: "ubuntu:22.04"  # Base development image
+    persistent_volumes: true     # Keep volumes between tasks
+    volume_size: "10Gi"         # Max volume size per agent
+    
+    # Development environment customization
+    environments:
+      - name: "python-dev"
+        image: "python:3.11-slim"
+        packages:
+          - "pytest"
+          - "black"
+          - "flake8"
+        volumes:
+          - "source:/workspace/src"
+          - "venv:/workspace/.venv"
+      
+      - name: "nodejs-dev"
+        image: "node:18-alpine"
+        packages:
+          - "jest"
+          - "eslint"
+          - "prettier"
+        volumes:
+          - "source:/workspace/src"
+          - "node_modules:/workspace/node_modules"
+      
+      - name: "fullstack"
+        dockerfile: |
+          FROM ubuntu:22.04
+          RUN apt-get update && apt-get install -y \
+              python3 python3-pip python3-venv \
+              nodejs npm \
+              git curl wget \
+              build-essential
+          WORKDIR /workspace
+        volumes:
+          - "source:/workspace/src"
+          - "cache:/workspace/.cache"
+    
+    # Container capabilities for development
+    capabilities:
+      add:
+        - "SYS_PTRACE"  # For debugging
+      drop:
+        - "NET_ADMIN"
+        - "SYS_ADMIN"
+    
+    # Resource limits per agent container
+    resources:
+      requests:
+        memory: "512Mi"
+        cpu: "0.5"
+      limits:
+        memory: "2Gi"
+        cpu: "1.0"
+
+# Podman-specific settings
+podman_config:
+  socket_path: "/run/user/1000/podman/podman.sock"
+  storage_driver: "overlay"
+  runtime: "crun"  # Lightweight container runtime
+  
+  # Network configuration for agent containers
+  network:
+    mode: "bridge"
+    name: "claude-dev-net"
+    subnet: "10.89.0.0/24"
+    enable_dns: true
+    
+  # Registry settings for custom images
+  registries:
+    - "docker.io"
+    - "quay.io"
+  
+  # Security settings
+  security:
+    userns: "keep-id"  # User namespace mapping
+    seccomp_profile: "default"
+    apparmor_profile: "unconfined"  # For development
+
+# Storage configuration with isolation
+storage:
+  workspace_path: "~/.claude-conductor/workspace"
+  isolated_workspaces_path: "~/.claude-conductor/isolated"
+  container_storage_path: "~/.claude-conductor/containers"
+  logs_path: "~/.claude-conductor/logs"
+  config_path: "~/.claude-conductor/config"
+  temp_path: "/tmp/claude-conductor"
+  
+  # Volume management
+  volumes:
+    driver: "local"
+    options:
+      - "type=tmpfs"
+      - "device=tmpfs"
+      - "o=size=1g,mode=1777"
+
+# Network configuration
+network:
+  dashboard_port: 8080
+  api_port: 8081
+  container_port_range: "9000-9100"  # For exposed services
+  bind_address: "127.0.0.1"
+  enable_cors: true
+  max_connections: 20
+
+# Enhanced features for isolated workspaces
+features:
+  redis_enabled: false
+  monitoring_enabled: true  # Monitor container resources
+  clustering_enabled: false
+  auto_scaling_enabled: false
+  metrics_collection: true
+  web_dashboard: true
+  agent_communication: true
+  container_management: true  # New feature
+  workspace_snapshots: true   # New feature
+
+# Development environment presets
+dev_environments:
+  presets:
+    - name: "minimal"
+      description: "Minimal development environment"
+      base_image: "alpine:latest"
+      packages: ["git", "curl"]
+      
+    - name: "python-ml"
+      description: "Python with ML libraries"
+      base_image: "python:3.11"
+      packages: ["numpy", "pandas", "scikit-learn", "jupyter"]
+      
+    - name: "web-dev"
+      description: "Full web development stack"
+      base_image: "node:18"
+      additional_tools:
+        - "postgresql-client"
+        - "redis-tools"
+        - "nginx"
+
+# Task execution with isolation
+task_execution:
+  default_priority: 5
+  max_retries: 2
+  retry_delay: 10
+  parallel_execution: true
+  timeout_buffer: 30
+  
+  # Isolation policies
+  isolation:
+    enforce_container: true
+    cleanup_on_failure: false  # Keep for debugging
+    snapshot_before_task: true
+    restore_on_error: true
+
+# Container lifecycle management
+container_lifecycle:
+  pre_task_hooks:
+    - "podman exec {container_id} /bin/bash -c 'cd /workspace && git status'"
+  
+  post_task_hooks:
+    - "podman exec {container_id} /bin/bash -c 'cd /workspace && git diff'"
+  
+  cleanup_policy:
+    max_age_hours: 24
+    max_containers: 10
+    preserve_on_error: true
+
+# Monitoring for isolated environments
+monitoring:
+  container_metrics: true
+  resource_usage: true
+  task_performance: true
+  
+  alerts:
+    memory_threshold: 0.9  # 90%
+    cpu_threshold: 0.8     # 80%
+    disk_threshold: 0.85   # 85%
+
+# Security settings for isolated workspaces
+security:
+  enable_authentication: false
+  enable_https: false
+  api_key_required: false
+  cors_origins: ["http://localhost:8080"]
+  
+  # Container security
+  container_security:
+    drop_capabilities: true
+    readonly_rootfs: false  # Allow writes for development
+    no_new_privileges: true
+    user_namespace: true
+
+# Example tasks for isolated environments
+example_tasks:
+  - task_type: "python_test"
+    description: "Run pytest in isolated Python environment"
+    environment: "python-dev"
+    commands:
+      - "cd /workspace/src"
+      - "python -m pytest tests/"
+    priority: 7
+    
+  - task_type: "node_build"
+    description: "Build Node.js project in isolated environment"
+    environment: "nodejs-dev"
+    commands:
+      - "cd /workspace/src"
+      - "npm install"
+      - "npm run build"
+    priority: 6
+    
+  - task_type: "integration_test"
+    description: "Run integration tests with database"
+    environment: "fullstack"
+    services:
+      - "postgres:14"
+      - "redis:7"
+    commands:
+      - "cd /workspace"
+      - "./scripts/integration-test.sh"
+    priority: 8

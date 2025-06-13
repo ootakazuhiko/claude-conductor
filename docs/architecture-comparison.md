@@ -252,3 +252,131 @@ Choose **Kubernetes** if:
 - ✅ Require auto-scaling
 - ✅ Have K8s expertise
 - ✅ Need enterprise features
+
+## 🔒 Agent Workspace Isolation
+
+### Isolation Levels by Deployment Mode
+
+#### 1. Standalone Mode (基本的な隔離)
+- **隔離レベル**: ⭐⭐
+- **実装方法**:
+  - **ファイルシステム**: 各エージェントは `/tmp/claude_workspace_{agent_id}` に専用ディレクトリ
+  - **プロセス分離**: 別プロセスとして実行、独自のメモリ空間
+  - **リソース制限**: 設定可能なメモリ・CPU制限（デフォルト: メモリ1GB、CPU 0.5コア）
+  - **ローカルストレージ**: `~/.claude-conductor/workspace/{agent_id}/` でエージェント別サブディレクトリ
+
+#### 2. Docker Compose Mode (コンテナベースの隔離)
+- **隔離レベル**: ⭐⭐⭐⭐
+- **実装方法**:
+  - **コンテナ分離**: 各エージェントが独立したDockerコンテナで実行
+  - **ボリュームマウント**: 特定ディレクトリのみバインドマウント
+    ```yaml
+    volumes:
+      - conductor_workspace:/workspace
+      - conductor_logs:/var/log/conductor
+    ```
+  - **ネットワーク分離**: 専用Dockerネットワーク (`claude-network`) 経由でのみ通信
+  - **リソース制限**: Dockerレベルでの制限
+    ```yaml
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+    ```
+  - **セキュリティコンテキスト**: 非rootユーザー (UID 1000) での実行
+
+#### 3. Kubernetes Mode (エンタープライズグレードの隔離)
+- **隔離レベル**: ⭐⭐⭐⭐⭐
+- **実装方法**:
+  - **Pod分離**: 各エージェントが独立したPodで実行
+  - **Namespace分離**: 専用の `claude-conductor` namespace
+  - **セキュリティコンテキスト**:
+    ```yaml
+    securityContext:
+      runAsNonRoot: true
+      runAsUser: 1000
+      runAsGroup: 1000
+      fsGroup: 1000
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop:
+        - ALL
+    ```
+  - **ボリューム隔離**:
+    - 共有ワークスペース: `PersistentVolumeClaim` (`ReadWriteMany`)
+    - エージェント専用: `emptyDir` ボリューム (5Gi制限)
+  - **RBAC**: ServiceAccountとRoleによる細かい権限制御
+  - **Network Policies**: Pod間通信の制限設定可能
+
+### Podman実装の詳細
+
+すべての構成で使用されるPodmanコンテナの隔離機能:
+
+```python
+cmd = [
+    "podman", "run", "-d",
+    "--name", container_name,
+    "-v", f"{work_dir}:/workspace:Z",  # SELinuxコンテキスト
+    "-w", "/workspace",
+    "--memory", "2g",                   # メモリ隔離
+    "--cpus", "1.0",                   # CPU隔離
+    "--userns=keep-id",                # ユーザー名前空間隔離
+    podman_image,
+    "sleep", "infinity"
+]
+```
+
+主要な隔離メカニズム:
+- **ユーザー名前空間**: `--userns=keep-id` でUID/GIDマッピング
+- **SELinuxコンテキスト**: `:Z` フラグで適切なラベリング
+- **リソース制限**: メモリ (2GB) とCPU (1.0コア) の制約
+- **ファイルシステム隔離**: 各コンテナ独自のファイルシステムレイヤー
+
+### ワークスペース隔離の設定オプション
+
+#### Standalone設定 (`config/standalone.yaml`):
+```yaml
+container_config:
+  memory_limit: "1g"
+  cpu_limit: "0.5"
+  enable_networking: false  # ネットワーク隔離
+  workspace_mount: true
+
+storage:
+  workspace_path: "~/.claude-conductor/workspace"
+  temp_path: "/tmp/claude-conductor"
+  agent_isolation: true  # エージェント間の隔離を有効化
+```
+
+#### Production設定 (`config/config.yaml`):
+```yaml
+agent:
+  container_memory: "2g"
+  container_cpu: "1.0"
+  workspace_isolation: strict  # strict/moderate/minimal
+  health_check_interval: 30
+  startup_timeout: 60
+```
+
+### セキュリティ境界
+
+| セキュリティ層 | Standalone | Docker | Kubernetes |
+|---------------|-----------|---------|------------|
+| プロセス分離 | ✅ 基本 | ✅ コンテナ | ✅ Pod |
+| ファイルシステム | ⚠️ 同一ホスト | ✅ レイヤー分離 | ✅ 完全分離 |
+| ネットワーク | ❌ 共有 | ✅ Bridge分離 | ✅ CNI + Policy |
+| リソース制限 | ⚠️ ソフト制限 | ✅ cgroup | ✅ cgroup + quota |
+| 権限管理 | ⚠️ OS依存 | ✅ 非root | ✅ RBAC + PSP |
+| 通信制御 | ⚠️ プロセス間 | ✅ Docker API | ✅ Service Mesh |
+
+### エージェント間通信
+
+すべての構成で、エージェント間の直接通信は禁止されており、必ずOrchestratorを介して行われます：
+
+1. **メッセージブローカー**: Orchestratorが中央のメッセージブローカーとして機能
+2. **Unix Socket**: エージェントとOrchestratorの通信はUnix Socket経由
+3. **タスクキュー**: Redis（オプション）またはインメモリキューでタスク管理
+4. **認証**: 各エージェントには一意のIDとトークンが発行される
+
+この設計により、エージェントが互いに干渉することなく、安全に並列実行できます。

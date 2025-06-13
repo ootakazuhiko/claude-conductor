@@ -11,10 +11,12 @@ import json
 import os
 import signal
 from dataclasses import dataclass, asdict
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Tuple
 import logging
+import asyncio
 
 from .protocol import Agent2AgentProtocol, UnixSocketChannel, AgentMessage, MessageType
+from .workspace_isolation import WorkspaceIsolationManager, WorkspaceContainer
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -28,6 +30,9 @@ class AgentConfig:
     podman_image: str = "ubuntu:22.04"
     memory_limit: str = "2g"
     cpu_limit: str = "1.0"
+    use_isolated_workspace: bool = False
+    workspace_environment: str = "minimal"
+    enable_snapshots: bool = True
     
 @dataclass
 class CommandResult:
@@ -303,21 +308,32 @@ if "--headless" in sys.argv:
 class ClaudeAgent:
     """Claude Codeエージェント"""
     
-    def __init__(self, agent_id: str, orchestrator_socket_path: str = "/tmp/claude_orchestrator.sock"):
+    def __init__(self, agent_id: str, orchestrator_socket_path: str = "/tmp/claude_orchestrator.sock",
+                 config: Optional[Dict[str, Any]] = None):
         self.agent_id = agent_id
         self.orchestrator_socket_path = orchestrator_socket_path
+        self.full_config = config or {}
+        
+        # 隔離ワークスペースの設定を確認
+        isolated_config = self.full_config.get('isolated_workspace', {})
+        use_isolation = isolated_config.get('enabled', False)
         
         # Podmanコンテナ設定
         self.config = AgentConfig(
             agent_id=agent_id,
             container_name=f"claude_agent_{agent_id}",
-            work_dir=f"/tmp/claude_workspace_{agent_id}"
+            work_dir=f"/tmp/claude_workspace_{agent_id}",
+            use_isolated_workspace=use_isolation,
+            workspace_environment=isolated_config.get('agent_containers', {}).get('base_image', 'minimal'),
+            enable_snapshots=isolated_config.get('mode', 'sandbox') == 'sandbox'
         )
         
         # コンポーネント
         self.wrapper: Optional[ClaudeCodeWrapper] = None
         self.protocol: Optional[Agent2AgentProtocol] = None
         self.channel: Optional[UnixSocketChannel] = None
+        self.workspace_manager: Optional[WorkspaceIsolationManager] = None
+        self.isolated_container: Optional[WorkspaceContainer] = None
         
         # 状態
         self.is_running = False
@@ -329,12 +345,16 @@ class ClaudeAgent:
         logger.info(f"Starting agent {self.agent_id}")
         
         try:
-            # ワークスペース作成
-            os.makedirs(self.config.work_dir, exist_ok=True)
-            
-            # Wrapperの初期化
-            self.wrapper = ClaudeCodeWrapper(self.config)
-            self.wrapper.setup_container()
+            # 隔離ワークスペースの設定
+            if self.config.use_isolated_workspace:
+                asyncio.run(self._setup_isolated_workspace())
+            else:
+                # 通常のワークスペース作成
+                os.makedirs(self.config.work_dir, exist_ok=True)
+                
+                # Wrapperの初期化
+                self.wrapper = ClaudeCodeWrapper(self.config)
+                self.wrapper.setup_container()
             
             # 通信チャネルの初期化
             try:
@@ -374,9 +394,12 @@ class ClaudeAgent:
         logger.info(f"Stopping agent {self.agent_id}")
         self.is_running = False
         
-        if self.wrapper:
-            self.wrapper.stop()
-            self.wrapper.cleanup_container()
+        if self.config.use_isolated_workspace and self.workspace_manager:
+            asyncio.run(self._cleanup_isolated_workspace())
+        else:
+            if self.wrapper:
+                self.wrapper.stop()
+                self.wrapper.cleanup_container()
             
         if self.channel:
             self.channel.close()
@@ -398,6 +421,8 @@ class ClaudeAgent:
                 result = self._execute_test_generation(task)
             elif task.task_type == "analysis":
                 result = self._execute_analysis(task)
+            elif task.task_type == "isolated_execution":
+                result = self._execute_isolated_task(task)
             else:
                 result = self._execute_generic_task(task)
                 
@@ -604,3 +629,120 @@ class ClaudeAgent:
             except Exception as e:
                 logger.error(f"Health check error: {e}")
                 self.health_check_failed += 1
+    
+    async def _setup_isolated_workspace(self):
+        """隔離されたワークスペースをセットアップ"""
+        logger.info(f"Setting up isolated workspace for agent {self.agent_id}")
+        
+        # ワークスペースマネージャーの初期化
+        self.workspace_manager = WorkspaceIsolationManager(self.full_config)
+        
+        # 環境名の決定
+        env_name = self.config.workspace_environment
+        if self.current_task and hasattr(self.current_task, 'environment'):
+            env_name = self.current_task.environment
+        
+        # ワークスペースコンテナの作成
+        self.isolated_container = await self.workspace_manager.create_workspace(
+            self.agent_id, env_name
+        )
+        
+        # スナップショットの作成（有効な場合）
+        if self.config.enable_snapshots:
+            await self.workspace_manager.create_snapshot(
+                self.agent_id, "initial"
+            )
+        
+        logger.info(f"Isolated workspace created: {self.isolated_container.container_id}")
+    
+    async def _cleanup_isolated_workspace(self):
+        """隔離されたワークスペースをクリーンアップ"""
+        if self.workspace_manager and self.isolated_container:
+            # タスク失敗時の処理
+            if self.current_task and self.config.enable_snapshots:
+                if self.full_config.get('task_execution', {}).get('isolation', {}).get('preserve_on_error', True):
+                    logger.info(f"Preserving workspace for debugging: {self.agent_id}")
+                    return
+            
+            # クリーンアップ
+            await self.workspace_manager.cleanup_workspace(
+                self.agent_id, 
+                preserve_volumes=False
+            )
+    
+    async def execute_in_isolated_workspace(self, command: List[str]) -> Tuple[int, str, str]:
+        """隔離されたワークスペースでコマンドを実行"""
+        if not self.workspace_manager or not self.isolated_container:
+            raise RuntimeError("Isolated workspace not initialized")
+        
+        return await self.workspace_manager.execute_in_workspace(
+            self.agent_id, command
+        )
+    
+    def _execute_isolated_task(self, task: Task) -> Dict[str, Any]:
+        """隔離されたワークスペースでタスクを実行"""
+        if not self.config.use_isolated_workspace:
+            return self._execute_generic_task(task)
+        
+        try:
+            # タスク前のスナップショット
+            if self.config.enable_snapshots:
+                asyncio.run(self.workspace_manager.create_snapshot(
+                    self.agent_id, f"pre-task-{task.task_id}"
+                ))
+            
+            # コマンドの実行
+            commands = []
+            if hasattr(task, 'commands'):
+                commands = task.commands
+            else:
+                commands = [task.description]
+            
+            results = []
+            for cmd in commands:
+                if isinstance(cmd, str):
+                    cmd_list = cmd.split()
+                else:
+                    cmd_list = cmd
+                
+                exit_code, stdout, stderr = asyncio.run(
+                    self.execute_in_isolated_workspace(cmd_list)
+                )
+                
+                results.append({
+                    'command': ' '.join(cmd_list),
+                    'exit_code': exit_code,
+                    'stdout': stdout,
+                    'stderr': stderr
+                })
+                
+                if exit_code != 0:
+                    # エラー時の処理
+                    if self.config.enable_snapshots and \
+                       self.full_config.get('task_execution', {}).get('isolation', {}).get('restore_on_error', True):
+                        asyncio.run(self.workspace_manager.restore_snapshot(
+                            self.agent_id, f"pre-task-{task.task_id}"
+                        ))
+                    break
+            
+            # タスク後のスナップショット（成功時）
+            if all(r['exit_code'] == 0 for r in results) and self.config.enable_snapshots:
+                asyncio.run(self.workspace_manager.create_snapshot(
+                    self.agent_id, f"post-task-{task.task_id}"
+                ))
+            
+            # ワークスペース情報の取得
+            workspace_info = self.workspace_manager.get_workspace_info(self.agent_id)
+            
+            return {
+                'results': results,
+                'workspace_info': workspace_info,
+                'success': all(r['exit_code'] == 0 for r in results)
+            }
+            
+        except Exception as e:
+            logger.error(f"Failed to execute isolated task: {e}")
+            return {
+                'error': str(e),
+                'success': False
+            }
