@@ -1,0 +1,124 @@
+version: '3.8'
+
+# Claude Conductor - Standalone Docker Compose
+# Simplified single-machine deployment
+
+services:
+  # Main conductor service - lightweight configuration
+  conductor:
+    build:
+      context: .
+      dockerfile: containers/Dockerfile
+      target: production
+      args:
+        PYTHON_VERSION: "3.10"
+    container_name: claude-conductor-standalone
+    restart: unless-stopped
+    ports:
+      - "8080:8080"   # Web Dashboard
+      - "8081:8081"   # API (optional)
+    volumes:
+      - conductor_workspace:/workspace
+      - conductor_logs:/var/log/conductor
+      - conductor_config:/home/claude/.conductor
+      - ./config/standalone.yaml:/app/config/config.yaml:ro
+    environment:
+      - CONDUCTOR_MODE=standalone
+      - CONDUCTOR_LOG_LEVEL=INFO
+      - CONDUCTOR_CONFIG=/app/config/config.yaml
+      - CONDUCTOR_NUM_AGENTS=2
+      - CONDUCTOR_DASHBOARD_PORT=8080
+      # Standalone-specific settings
+      - CONDUCTOR_FEATURES_REDIS_ENABLED=false
+      - CONDUCTOR_FEATURES_MONITORING_ENABLED=false
+      - CONDUCTOR_FEATURES_CLUSTERING_ENABLED=false
+    networks:
+      - conductor-standalone
+    healthcheck:
+      test: ["CMD", "/healthcheck.sh"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    command: ["full"]
+    # Resource limits for single PC
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+  # Optional: Redis for advanced features (commented out by default)
+  # redis:
+  #   image: redis:7-alpine
+  #   container_name: claude-conductor-redis
+  #   restart: unless-stopped
+  #   volumes:
+  #     - redis_data:/data
+  #   networks:
+  #     - conductor-standalone
+  #   command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+  #   deploy:
+  #     resources:
+  #       limits:
+  #         cpus: '0.5'
+  #         memory: 512M
+
+  # Optional: Simple file server for workspace access
+  file-server:
+    image: nginx:alpine
+    container_name: claude-conductor-files
+    restart: unless-stopped
+    ports:
+      - "8090:80"
+    volumes:
+      - conductor_workspace:/usr/share/nginx/html/workspace:ro
+      - conductor_logs:/usr/share/nginx/html/logs:ro
+      - ./containers/nginx-standalone.conf:/etc/nginx/conf.d/default.conf:ro
+    networks:
+      - conductor-standalone
+    profiles:
+      - files
+    deploy:
+      resources:
+        limits:
+          cpus: '0.2'
+          memory: 128M
+
+volumes:
+  conductor_workspace:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${HOME}/.claude-conductor/workspace
+  conductor_logs:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind  
+      device: ${HOME}/.claude-conductor/logs
+  conductor_config:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${HOME}/.claude-conductor/config
+  # redis_data:
+  #   driver: local
+
+networks:
+  conductor-standalone:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
+
+# Docker Compose profiles for different use cases
+# Usage:
+#   docker-compose -f docker-compose.standalone.yml up                    # Basic setup
+#   docker-compose -f docker-compose.standalone.yml --profile files up   # With file server
+#   docker-compose -f docker-compose.standalone.yml --profile redis up   # With Redis

@@ -1,0 +1,134 @@
+# Claude Conductor - Standalone Configuration
+# Optimized for single PC deployment with minimal resource usage
+
+# Core settings
+num_agents: 2
+max_workers: 4
+task_timeout: 120
+log_level: "INFO"
+
+# Agent configuration - lightweight settings
+agent_config:
+  startup_delay: 5  # seconds
+  health_check_interval: 30
+  max_memory_usage: "1g"
+  max_cpu_usage: "0.5"
+
+# Container configuration - reduced resource requirements
+container_config:
+  image: "ubuntu:22.04"
+  memory_limit: "1g"
+  cpu_limit: "0.5"
+  enable_networking: false  # Disable container networking for simplicity
+  workspace_mount: true
+
+# Storage configuration
+storage:
+  workspace_path: "~/.claude-conductor/workspace"
+  logs_path: "~/.claude-conductor/logs"
+  config_path: "~/.claude-conductor/config"
+  temp_path: "/tmp/claude-conductor"
+  max_log_size: "100MB"
+  log_rotation_count: 3
+
+# Network configuration
+network:
+  dashboard_port: 8080
+  api_port: 8081
+  bind_address: "127.0.0.1"  # Local only for security
+  enable_cors: false
+  max_connections: 10
+
+# Feature toggles - disable complex features for standalone
+features:
+  redis_enabled: false
+  monitoring_enabled: false
+  clustering_enabled: false
+  auto_scaling_enabled: false
+  metrics_collection: true
+  web_dashboard: true
+  agent_communication: true
+
+# Performance settings
+performance:
+  thread_pool_size: 4
+  queue_max_size: 100
+  task_batch_size: 5
+  enable_caching: true
+  cache_ttl: 300  # 5 minutes
+
+# Development/testing settings
+development:
+  mock_claude_code: true  # Use mock Claude Code CLI
+  enable_debug_logs: false
+  auto_restart_agents: true
+  simulate_task_execution: false
+
+# Security settings (basic for standalone)
+security:
+  enable_authentication: false
+  enable_https: false
+  api_key_required: false
+  cors_origins: ["http://localhost:8080"]
+
+# Task execution settings
+task_execution:
+  default_priority: 5
+  max_retries: 2
+  retry_delay: 5  # seconds
+  parallel_execution: true
+  timeout_buffer: 10  # seconds
+
+# Logging configuration
+logging:
+  format: "%(asctime)s [%(levelname)8s] %(name)s: %(message)s"
+  date_format: "%Y-%m-%d %H:%M:%S"
+  console_output: true
+  file_output: true
+  json_format: false
+  
+  loggers:
+    conductor.orchestrator:
+      level: "INFO"
+    conductor.agent:
+      level: "INFO"
+    conductor.protocol:
+      level: "WARNING"
+    conductor.utils:
+      level: "WARNING"
+
+# Dashboard configuration
+dashboard:
+  title: "Claude Conductor - Standalone"
+  auto_refresh_interval: 5  # seconds
+  max_log_entries: 100
+  enable_task_submission: true
+  enable_agent_management: false  # Simplified for standalone
+  theme: "light"
+
+# Notifications (disabled for standalone)
+notifications:
+  enabled: false
+  email_notifications: false
+  webhook_notifications: false
+
+# Backup and maintenance
+maintenance:
+  auto_cleanup_logs: true
+  log_retention_days: 7
+  workspace_cleanup: true
+  temp_file_cleanup: true
+  cleanup_interval: 3600  # 1 hour
+
+# Example tasks for testing
+example_tasks:
+  - task_type: "generic"
+    description: "echo 'Hello from Claude Conductor!'"
+    priority: 5
+  - task_type: "code_review"
+    description: "Review sample Python file"
+    files: ["example.py"]
+    priority: 7
+  - task_type: "analysis" 
+    description: "Analyze project structure"
+    priority: 6
