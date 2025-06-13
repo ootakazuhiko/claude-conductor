@@ -3,6 +3,6 @@ flask-cors==6.0.0
 sqlalchemy==2.0.0
 pytest==7.4.0
 pytest-cov==4.1.0
-black==23.7.0
+black==24.3.0
 flake8==6.1.0
 mypy==1.5.0
