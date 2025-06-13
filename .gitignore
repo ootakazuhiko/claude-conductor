@@ -1,9 +1,21 @@
 __pycache__/
 *.pyc
 venv/
+.venv/
 .env
 logs/
 workspace/
 *.sock
 .pytest_cache/
 *.log
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+.hypothesis/
+*.egg-info/
+dist/
+build/
+# uv
+.python-version.local
+uv.lock.local
