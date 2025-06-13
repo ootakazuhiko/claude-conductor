@@ -8,7 +8,7 @@ services:
       dockerfile: containers/Dockerfile
       target: production
       args:
-        PYTHON_VERSION: "3.10"
+        PYTHON_VERSION: "3.11"
         NODE_VERSION: "18"
     container_name: claude-conductor
     restart: unless-stopped

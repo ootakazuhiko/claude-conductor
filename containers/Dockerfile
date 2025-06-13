@@ -67,8 +67,10 @@ RUN groupadd -g ${CLAUDE_GID} ${CLAUDE_USER} \
     && mkdir -p ${WORKSPACE_DIR} \
     && chown -R ${CLAUDE_USER}:${CLAUDE_USER} ${WORKSPACE_DIR}
 
-# Install Python dependencies
-RUN python3 -m pip install --upgrade pip setuptools wheel
+# Install uv for Python package management
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh \
+    && mv /root/.cargo/bin/uv /usr/local/bin/uv \
+    && uv --version
 
 # Development stage
 FROM base AS development
@@ -81,16 +83,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python development packages
-RUN pip install \
-    ipython \
-    jupyter \
-    pytest \
-    pytest-cov \
-    black \
-    flake8 \
-    mypy \
-    pre-commit
+# Copy project files for development
+COPY --chown=${CLAUDE_USER}:${CLAUDE_USER} pyproject.toml /app/pyproject.toml
+COPY --chown=${CLAUDE_USER}:${CLAUDE_USER} .python-version /app/.python-version
+
+# Install development packages using uv
+RUN cd /app && \
+    uv venv .venv && \
+    . .venv/bin/activate && \
+    uv pip install -e ".[dev]"
 
 # Production stage
 FROM base AS production
@@ -99,8 +100,11 @@ FROM base AS production
 COPY --chown=${CLAUDE_USER}:${CLAUDE_USER} . /app
 WORKDIR /app
 
-# Install Claude Conductor
-RUN pip install -e .[all]
+# Install Claude Conductor using uv
+RUN cd /app && \
+    uv venv .venv && \
+    . .venv/bin/activate && \
+    uv pip install -e ".[all]"
 
 # Install Claude Code CLI (mock for now)
 COPY --chown=${CLAUDE_USER}:${CLAUDE_USER} containers/install-claude-code.sh /tmp/install-claude-code.sh
@@ -148,6 +152,9 @@ LABEL maintainer="Claude Conductor Team" \
       org.opencontainers.image.description="Multi-agent orchestration system for Claude Code instances" \
       org.opencontainers.image.vendor="Claude Conductor Team" \
       org.opencontainers.image.licenses="MIT"
+
+# Add venv to PATH
+ENV PATH="/app/.venv/bin:$PATH"
 
 # Entry point
 ENTRYPOINT ["/entrypoint.sh"]

@@ -9,7 +9,7 @@ on:
     types: [ published ]
 
 env:
-  PYTHON_VERSION: "3.10"
+  PYTHON_VERSION: "3.11"
 
 jobs:
   test:
@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.10", "3.11", "3.12"]
+        python-version: ["3.9", "3.10", "3.11", "3.12"]
     
     steps:
     - name: Checkout code
@@ -36,10 +36,16 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-pip-
     
-    - name: Install dependencies
+    - name: Install uv
       run: |
-        python -m pip install --upgrade pip
-        pip install -e .[dev,all]
+        curl -LsSf https://astral.sh/uv/install.sh | sh
+        echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+    
+    - name: Install dependencies with uv
+      run: |
+        uv venv
+        source .venv/bin/activate
+        uv pip install -e .[dev,all]
     
     - name: Install container runtime (Podman)
       run: |
@@ -48,29 +54,34 @@ jobs:
     
     - name: Run linting
       run: |
+        source .venv/bin/activate
         black --check conductor/ tests/
-        flake8 conductor/ tests/
+        ruff check conductor/ tests/
         mypy conductor/
     
     - name: Run security check
       run: |
+        source .venv/bin/activate
         bandit -r conductor/
-        safety check --json
+        pip-audit
     
     - name: Run unit tests
       run: |
+        source .venv/bin/activate
         pytest tests/unit/ -v --cov=conductor --cov-report=xml --cov-report=term-missing
     
     - name: Run integration tests
       run: |
+        source .venv/bin/activate
         pytest tests/integration/ -v -m "not slow"
     
     - name: Run E2E tests (non-container)
       run: |
+        source .venv/bin/activate
         pytest tests/e2e/ -v -m "not container and not slow"
     
     - name: Upload coverage to Codecov
-      if: matrix.python-version == '3.10'
+      if: matrix.python-version == '3.11'
       uses: codecov/codecov-action@v3
       with:
         file: ./coverage.xml
@@ -101,10 +112,16 @@ jobs:
       with:
         python-version: ${{ env.PYTHON_VERSION }}
     
-    - name: Install dependencies
+    - name: Install uv
       run: |
-        python -m pip install --upgrade pip
-        pip install -e .[dev,all]
+        curl -LsSf https://astral.sh/uv/install.sh | sh
+        echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+    
+    - name: Install dependencies with uv
+      run: |
+        uv venv
+        source .venv/bin/activate
+        uv pip install -e .[dev,all]
     
     - name: Install Podman
       run: |
@@ -113,6 +130,7 @@ jobs:
     
     - name: Run container tests
       run: |
+        source .venv/bin/activate
         pytest tests/ -v -m "container" --timeout=300
 
   build:
@@ -131,10 +149,16 @@ jobs:
       with:
         python-version: ${{ env.PYTHON_VERSION }}
     
+    - name: Install uv
+      run: |
+        curl -LsSf https://astral.sh/uv/install.sh | sh
+        echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+    
     - name: Install build dependencies
       run: |
-        python -m pip install --upgrade pip
-        pip install build twine wheel setuptools
+        uv venv
+        source .venv/bin/activate
+        uv pip install build twine wheel hatchling
     
     - name: Build package
       run: |

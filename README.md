@@ -34,11 +34,34 @@ Claude Conductorは、複数のClaude Codeインスタンスを独立したコ�
 
 ### Prerequisites
 
-- Python 3.10+
+- Python 3.9+
 - Podman or Docker
 - Claude Code CLI
 
-### Installation
+### Installation (Using uv - Recommended)
+
+1. Install uv:
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+2. Clone the repository:
+```bash
+git clone https://github.com/ootakazuhiko/claude-conductor.git
+cd claude-conductor
+```
+
+3. Set up the environment:
+```bash
+uv venv
+source .venv/bin/activate  # On Linux/macOS
+# or
+.venv\Scripts\activate  # On Windows
+
+uv pip install -e ".[all]"
+```
+
+### Installation (Traditional method)
 
 1. Clone the repository:
 ```bash
@@ -61,11 +84,34 @@ pip install -r requirements.txt
 
 ### 前提条件
 
-- Python 3.10+
+- Python 3.9+
 - Podman または Docker
 - Claude Code CLI
 
-### インストール
+### インストール (uvを使用 - 推奨)
+
+1. uvをインストール:
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+2. リポジトリをクローン:
+```bash
+git clone https://github.com/ootakazuhiko/claude-conductor.git
+cd claude-conductor
+```
+
+3. 環境をセットアップ:
+```bash
+uv venv
+source .venv/bin/activate  # Linux/macOSの場合
+# または
+.venv\Scripts\activate  # Windowsの場合
+
+uv pip install -e ".[all]"
+```
+
+### インストール (従来の方法)
 
 1. リポジトリをクローン:
 ```bash
