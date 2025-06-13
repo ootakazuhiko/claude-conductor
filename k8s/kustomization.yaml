@@ -1,0 +1,109 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+metadata:
+  name: claude-conductor
+  namespace: claude-conductor
+
+# Resource files to include
+resources:
+- namespace.yaml
+- configmap.yaml
+- secret.yaml
+- pvc.yaml
+- rbac.yaml
+- deployment.yaml
+- service.yaml
+- ingress.yaml
+- hpa.yaml
+- monitoring.yaml
+
+# Namespace to apply to all resources
+namespace: claude-conductor
+
+# Common labels applied to all resources
+commonLabels:
+  app.kubernetes.io/name: claude-conductor
+  app.kubernetes.io/version: "1.0.0"
+  app.kubernetes.io/managed-by: kustomize
+
+# Common annotations applied to all resources
+commonAnnotations:
+  contact: "claude-conductor-team@example.com"
+  documentation: "https://github.com/ootakazuhiko/claude-conductor"
+
+# Image configurations
+images:
+- name: claudeconductor/claude-conductor
+  newTag: latest
+
+# ConfigMap generator for additional configurations
+configMapGenerator:
+- name: claude-conductor-env
+  literals:
+  - CONDUCTOR_VERSION=1.0.0
+  - DEPLOYMENT_ENVIRONMENT=production
+  - KUBERNETES_CLUSTER=true
+
+# Secret generator (be careful with secrets in version control)
+secretGenerator:
+- name: claude-conductor-env-secrets
+  type: Opaque
+  literals:
+  - DATABASE_URL=""  # Add your database URL
+  - EXTERNAL_API_KEY=""  # Add external API keys as needed
+
+# Resource modifications
+patchesStrategicMerge:
+- |-
+  apiVersion: apps/v1
+  kind: Deployment
+  metadata:
+    name: claude-conductor
+    namespace: claude-conductor
+  spec:
+    template:
+      spec:
+        containers:
+        - name: orchestrator
+          env:
+          - name: CONDUCTOR_VERSION
+            valueFrom:
+              configMapKeyRef:
+                name: claude-conductor-env
+                key: CONDUCTOR_VERSION
+          - name: DEPLOYMENT_ENVIRONMENT
+            valueFrom:
+              configMapKeyRef:
+                name: claude-conductor-env
+                key: DEPLOYMENT_ENVIRONMENT
+
+# Replacements for dynamic values
+replacements:
+- source:
+    kind: ConfigMap
+    name: claude-conductor-config
+    fieldPath: data.config\.yaml
+  targets:
+  - select:
+      kind: Deployment
+      name: claude-conductor
+    fieldPaths:
+    - spec.template.spec.containers.[name=orchestrator].env.[name=CONDUCTOR_CONFIG].value
+
+# Validation rules
+validators:
+- name: validate-namespace
+  kind: Namespace
+  message: "Namespace must exist"
+- name: validate-rbac
+  kind: ClusterRole
+  message: "RBAC must be properly configured"
+
+# Build metadata
+buildMetadata:
+- fromAnnotations:
+  - build.date
+  - build.version
+  - git.commit
+  - git.branch

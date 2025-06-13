@@ -1,0 +1,36 @@
+[run]
+source = conductor
+omit = 
+    */tests/*
+    */test_*
+    setup.py
+    */venv/*
+    */.venv/*
+    */site-packages/*
+    */__pycache__/*
+branch = True
+parallel = True
+
+[report]
+exclude_lines =
+    pragma: no cover
+    def __repr__
+    raise AssertionError
+    raise NotImplementedError
+    if __name__ == .__main__.:
+    if TYPE_CHECKING:
+    @abstract
+    @abstractmethod
+    pass
+    \.\.\.
+precision = 2
+show_missing = True
+skip_covered = False
+skip_empty = True
+
+[html]
+directory = htmlcov
+title = Claude Conductor Coverage Report
+
+[xml]
+output = coverage.xml

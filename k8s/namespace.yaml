@@ -1,0 +1,46 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: claude-conductor
+  labels:
+    name: claude-conductor
+    app.kubernetes.io/name: claude-conductor
+    app.kubernetes.io/version: "1.0.0"
+    app.kubernetes.io/component: orchestration
+    app.kubernetes.io/part-of: claude-conductor
+---
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: claude-conductor-limits
+  namespace: claude-conductor
+spec:
+  limits:
+  - default:
+      cpu: "1000m"
+      memory: "2Gi"
+    defaultRequest:
+      cpu: "100m"
+      memory: "256Mi"
+    type: Container
+  - default:
+      storage: "10Gi"
+    type: PersistentVolumeClaim
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: claude-conductor-quota
+  namespace: claude-conductor
+spec:
+  hard:
+    requests.cpu: "4"
+    requests.memory: "8Gi"
+    limits.cpu: "8"
+    limits.memory: "16Gi"
+    persistentvolumeclaims: "10"
+    requests.storage: "100Gi"
+    pods: "20"
+    services: "10"
+    configmaps: "10"
+    secrets: "10"

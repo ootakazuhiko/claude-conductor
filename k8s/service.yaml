@@ -1,0 +1,97 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: claude-conductor
+  namespace: claude-conductor
+  labels:
+    app.kubernetes.io/name: claude-conductor
+    app.kubernetes.io/component: orchestrator
+spec:
+  type: ClusterIP
+  ports:
+  - name: dashboard
+    port: 8080
+    targetPort: dashboard
+    protocol: TCP
+  - name: api
+    port: 8081
+    targetPort: api
+    protocol: TCP
+  - name: metrics
+    port: 9090
+    targetPort: metrics
+    protocol: TCP
+  selector:
+    app.kubernetes.io/name: claude-conductor
+    app.kubernetes.io/component: orchestrator
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: claude-conductor-headless
+  namespace: claude-conductor
+  labels:
+    app.kubernetes.io/name: claude-conductor
+    app.kubernetes.io/component: orchestrator
+spec:
+  type: ClusterIP
+  clusterIP: None
+  ports:
+  - name: dashboard
+    port: 8080
+    targetPort: dashboard
+    protocol: TCP
+  - name: api
+    port: 8081
+    targetPort: api
+    protocol: TCP
+  selector:
+    app.kubernetes.io/name: claude-conductor
+    app.kubernetes.io/component: orchestrator
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: claude-conductor-agents
+  namespace: claude-conductor
+  labels:
+    app.kubernetes.io/name: claude-conductor
+    app.kubernetes.io/component: agent
+spec:
+  type: ClusterIP
+  clusterIP: None  # Headless service for agents
+  ports:
+  - name: metrics
+    port: 9090
+    targetPort: metrics
+    protocol: TCP
+  selector:
+    app.kubernetes.io/name: claude-conductor
+    app.kubernetes.io/component: agent
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: claude-conductor-external
+  namespace: claude-conductor
+  labels:
+    app.kubernetes.io/name: claude-conductor
+    app.kubernetes.io/component: orchestrator
+spec:
+  type: LoadBalancer  # Change to NodePort or ClusterIP as needed
+  ports:
+  - name: dashboard
+    port: 80
+    targetPort: dashboard
+    protocol: TCP
+  - name: api
+    port: 8081
+    targetPort: api
+    protocol: TCP
+  selector:
+    app.kubernetes.io/name: claude-conductor
+    app.kubernetes.io/component: orchestrator
+  # Uncomment and configure if using specific load balancer
+  # loadBalancerIP: "192.168.1.100"
+  # loadBalancerSourceRanges:
+  # - "192.168.1.0/24"

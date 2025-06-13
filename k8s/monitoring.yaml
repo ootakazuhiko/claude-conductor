@@ -1,0 +1,147 @@
+# ServiceMonitor for Prometheus scraping
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: claude-conductor-orchestrator
+  namespace: claude-conductor
+  labels:
+    app.kubernetes.io/name: claude-conductor
+    app.kubernetes.io/component: orchestrator
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: claude-conductor
+      app.kubernetes.io/component: orchestrator
+  endpoints:
+  - port: metrics
+    path: /metrics
+    interval: 30s
+    scrapeTimeout: 10s
+    scheme: http
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: claude-conductor-agents
+  namespace: claude-conductor
+  labels:
+    app.kubernetes.io/name: claude-conductor
+    app.kubernetes.io/component: agent
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: claude-conductor
+      app.kubernetes.io/component: agent
+  endpoints:
+  - port: metrics
+    path: /metrics
+    interval: 30s
+    scrapeTimeout: 10s
+    scheme: http
+---
+# PrometheusRule for alerting
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: claude-conductor-alerts
+  namespace: claude-conductor
+  labels:
+    app.kubernetes.io/name: claude-conductor
+    prometheus: monitoring
+spec:
+  groups:
+  - name: claude-conductor.rules
+    rules:
+    - alert: ConductorOrchestratorDown
+      expr: up{job="claude-conductor-orchestrator"} == 0
+      for: 1m
+      labels:
+        severity: critical
+      annotations:
+        summary: "Claude Conductor orchestrator is down"
+        description: "The Claude Conductor orchestrator has been down for more than 1 minute."
+    
+    - alert: ConductorHighTaskFailureRate
+      expr: rate(conductor_tasks_failed_total[5m]) / rate(conductor_tasks_total[5m]) > 0.1
+      for: 2m
+      labels:
+        severity: warning
+      annotations:
+        summary: "High task failure rate in Claude Conductor"
+        description: "Claude Conductor has a task failure rate of {{ $value | humanizePercentage }} over the last 5 minutes."
+    
+    - alert: ConductorHighCPUUsage
+      expr: rate(container_cpu_usage_seconds_total{pod=~"claude-conductor.*"}[5m]) > 0.8
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: "High CPU usage in Claude Conductor"
+        description: "Claude Conductor pod {{ $labels.pod }} has high CPU usage: {{ $value | humanizePercentage }}"
+    
+    - alert: ConductorHighMemoryUsage
+      expr: container_memory_usage_bytes{pod=~"claude-conductor.*"} / container_spec_memory_limit_bytes > 0.9
+      for: 3m
+      labels:
+        severity: warning
+      annotations:
+        summary: "High memory usage in Claude Conductor"
+        description: "Claude Conductor pod {{ $labels.pod }} has high memory usage: {{ $value | humanizePercentage }}"
+    
+    - alert: ConductorAgentsDown
+      expr: count(up{job="claude-conductor-agents"} == 1) < 2
+      for: 1m
+      labels:
+        severity: warning
+      annotations:
+        summary: "Insufficient Claude Conductor agents"
+        description: "Less than 2 Claude Conductor agents are running. Current count: {{ $value }}"
+    
+    - alert: ConductorTaskQueueBacklog
+      expr: conductor_task_queue_length > 50
+      for: 2m
+      labels:
+        severity: warning
+      annotations:
+        summary: "Large task queue backlog in Claude Conductor"
+        description: "Claude Conductor has {{ $value }} tasks in the queue, indicating a potential backlog."
+    
+    - alert: ConductorLowDiskSpace
+      expr: (1 - (node_filesystem_avail_bytes{mountpoint="/workspace"} / node_filesystem_size_bytes{mountpoint="/workspace"})) > 0.9
+      for: 5m
+      labels:
+        severity: critical
+      annotations:
+        summary: "Low disk space on Claude Conductor workspace"
+        description: "Claude Conductor workspace has less than 10% free disk space remaining."
+    
+    - alert: ConductorPodCrashLooping
+      expr: rate(kube_pod_container_status_restarts_total{pod=~"claude-conductor.*"}[15m]) > 0
+      for: 1m
+      labels:
+        severity: warning
+      annotations:
+        summary: "Claude Conductor pod is crash looping"
+        description: "Claude Conductor pod {{ $labels.pod }} has restarted {{ $value }} times in the last 15 minutes."
+---
+# PodMonitor for additional pod-level metrics
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: claude-conductor-pods
+  namespace: claude-conductor
+  labels:
+    app.kubernetes.io/name: claude-conductor
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: claude-conductor
+  podMetricsEndpoints:
+  - port: metrics
+    path: /metrics
+    interval: 30s
+    scrapeTimeout: 10s
+  - port: metrics
+    path: /health
+    interval: 60s
+    scrapeTimeout: 5s

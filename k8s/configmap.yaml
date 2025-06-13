@@ -1,0 +1,121 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: claude-conductor-config
+  namespace: claude-conductor
+  labels:
+    app.kubernetes.io/name: claude-conductor
+    app.kubernetes.io/component: configuration
+data:
+  config.yaml: |
+    # Claude Conductor Configuration
+    num_agents: 3
+    max_workers: 10
+    task_timeout: 300
+    log_level: "INFO"
+    
+    # Container configuration
+    container_config:
+      image: "claudeconductor/claude-conductor:latest"
+      memory_limit: "2g"
+      cpu_limit: "1.0"
+      
+    # Storage configuration
+    storage:
+      workspace_path: "/workspace"
+      logs_path: "/var/log/conductor"
+      
+    # Network configuration
+    network:
+      dashboard_port: 8080
+      api_port: 8081
+      health_check_interval: 30
+      
+    # Redis configuration (if enabled)
+    redis:
+      host: "claude-conductor-redis"
+      port: 6379
+      database: 0
+      
+    # Monitoring configuration
+    monitoring:
+      enabled: true
+      metrics_port: 9090
+      
+  logging.yaml: |
+    version: 1
+    disable_existing_loggers: false
+    
+    formatters:
+      standard:
+        format: '%(asctime)s [%(levelname)8s] %(name)s: %(message)s'
+      json:
+        format: '{"timestamp": "%(asctime)s", "level": "%(levelname)s", "logger": "%(name)s", "message": "%(message)s"}'
+    
+    handlers:
+      console:
+        class: logging.StreamHandler
+        level: INFO
+        formatter: standard
+        stream: ext://sys.stdout
+        
+      file:
+        class: logging.handlers.RotatingFileHandler
+        level: DEBUG
+        formatter: json
+        filename: /var/log/conductor/conductor.log
+        maxBytes: 10485760  # 10MB
+        backupCount: 5
+    
+    loggers:
+      conductor:
+        level: DEBUG
+        handlers: [console, file]
+        propagate: false
+        
+    root:
+      level: INFO
+      handlers: [console]
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: claude-conductor-scripts
+  namespace: claude-conductor
+  labels:
+    app.kubernetes.io/name: claude-conductor
+    app.kubernetes.io/component: scripts
+data:
+  init.sh: |
+    #!/bin/bash
+    set -e
+    
+    echo "Initializing Claude Conductor..."
+    
+    # Create necessary directories
+    mkdir -p /workspace /var/log/conductor /home/claude/.conductor
+    
+    # Set proper permissions
+    chown -R claude:claude /workspace /var/log/conductor /home/claude/.conductor
+    
+    # Initialize workspace if empty
+    if [ ! -f /workspace/.initialized ]; then
+        echo "Initializing workspace..."
+        touch /workspace/.initialized
+        echo "Workspace initialized at $(date)" > /workspace/.initialized
+    fi
+    
+    echo "Initialization complete"
+    
+  healthcheck.sh: |
+    #!/bin/bash
+    set -e
+    
+    # Health check for conductor
+    curl -f -s http://localhost:8080/health > /dev/null || exit 1
+    
+    # Check if conductor process is running
+    pgrep -f "conductor.orchestrator" > /dev/null || exit 1
+    
+    echo "Health check passed"
+    exit 0
