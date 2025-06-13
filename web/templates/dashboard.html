@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Claude Conductor Dashboard</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            color: #333;
+        }
+        .container { max-width: 1400px; margin: 0 auto; padding: 20px; }
+        .header { 
+            text-align: center; 
+            margin-bottom: 30px; 
+            background: rgba(255,255,255,0.95); 
+            padding: 20px; 
+            border-radius: 12px; 
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+        }
+        .header h1 { color: #2c3e50; font-size: 2.5em; margin-bottom: 10px; }
+        .header p { color: #7f8c8d; font-size: 1.1em; }
+        
+        .dashboard-grid { 
+            display: grid; 
+            grid-template-columns: 2fr 1fr; 
+            gap: 20px; 
+            margin-bottom: 20px; 
+        }
+        
+        .card { 
+            background: rgba(255,255,255,0.95); 
+            padding: 25px; 
+            border-radius: 12px; 
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            backdrop-filter: blur(10px);
+        }
+        
+        .card h2 { 
+            color: #2c3e50; 
+            margin-bottom: 20px; 
+            font-size: 1.4em;
+            border-bottom: 2px solid #3498db;
+            padding-bottom: 10px;
+        }
+        
+        .stats-grid { 
+            display: grid; 
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); 
+            gap: 15px; 
+        }
+        
+        .stat-item { 
+            text-align: center; 
+            padding: 20px; 
+            background: linear-gradient(135deg, #3498db, #2980b9); 
+            color: white; 
+            border-radius: 10px;
+            transition: transform 0.3s ease;
+        }
+        
+        .stat-item:hover { transform: translateY(-5px); }
+        
+        .stat-value { 
+            font-size: 2.5em; 
+            font-weight: bold; 
+            margin-bottom: 5px;
+        }
+        
+        .stat-label { 
+            font-size: 0.9em; 
+            opacity: 0.9; 
+        }
+        
+        .agents-grid { 
+            display: grid; 
+            gap: 15px; 
+        }
+        
+        .agent { 
+            padding: 15px; 
+            background: #f8f9fa; 
+            border-radius: 8px; 
+            border-left: 4px solid #27ae60;
+            transition: all 0.3s ease;
+        }
+        
+        .agent:hover { background: #e9ecef; }
+        .agent.offline { border-left-color: #e74c3c; background: #fdf2f2; }
+        .agent.busy { border-left-color: #f39c12; background: #fef9e7; }
+        
+        .agent h4 { color: #2c3e50; margin-bottom: 8px; }
+        .agent-status { 
+            display: flex; 
+            justify-content: space-between; 
+            align-items: center; 
+            margin: 5px 0; 
+        }
+        
+        .status-badge {
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.8em;
+            font-weight: bold;
+        }
+        
+        .status-running { background: #d4edda; color: #155724; }
+        .status-stopped { background: #f8d7da; color: #721c24; }
+        .status-busy { background: #fff3cd; color: #856404; }
+        
+        .task-form { 
+            background: #f8f9fa; 
+            padding: 20px; 
+            border-radius: 8px;
+            border: 1px solid #dee2e6;
+        }
+        
+        .form-group { margin-bottom: 15px; }
+        .form-group label { 
+            display: block; 
+            margin-bottom: 5px; 
+            font-weight: 600; 
+            color: #495057;
+        }
+        
+        .form-control { 
+            width: 100%; 
+            padding: 10px; 
+            border: 1px solid #ced4da; 
+            border-radius: 6px; 
+            font-size: 14px;
+            transition: border-color 0.3s ease;
+        }
+        
+        .form-control:focus { 
+            outline: none; 
+            border-color: #3498db; 
+            box-shadow: 0 0 0 2px rgba(52, 152, 219, 0.2);
+        }
+        
+        .btn { 
+            background: linear-gradient(135deg, #3498db, #2980b9); 
+            color: white; 
+            padding: 12px 24px; 
+            border: none; 
+            border-radius: 6px; 
+            cursor: pointer; 
+            font-size: 14px;
+            font-weight: 600;
+            transition: all 0.3s ease;
+        }
+        
+        .btn:hover { 
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(52, 152, 219, 0.4);
+        }
+        
+        .btn-success { background: linear-gradient(135deg, #27ae60, #229954); }
+        .btn-warning { background: linear-gradient(135deg, #f39c12, #e67e22); }
+        
+        .activity-log { 
+            background: #2c3e50; 
+            color: #ecf0f1; 
+            padding: 20px; 
+            border-radius: 8px; 
+            font-family: 'Courier New', monospace; 
+            font-size: 12px; 
+            max-height: 300px; 
+            overflow-y: auto;
+            border: 1px solid #34495e;
+        }
+        
+        .activity-log::-webkit-scrollbar { width: 8px; }
+        .activity-log::-webkit-scrollbar-track { background: #34495e; }
+        .activity-log::-webkit-scrollbar-thumb { background: #7f8c8d; border-radius: 4px; }
+        
+        .connection-status {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 10px 15px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: bold;
+            z-index: 1000;
+        }
+        
+        .connected { background: #d4edda; color: #155724; }
+        .disconnected { background: #f8d7da; color: #721c24; }
+        
+        .chart-container {
+            height: 200px;
+            margin-top: 15px;
+            background: #f8f9fa;
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #6c757d;
+        }
+        
+        @media (max-width: 768px) {
+            .dashboard-grid { grid-template-columns: 1fr; }
+            .stats-grid { grid-template-columns: repeat(2, 1fr); }
+        }
+    </style>
+</head>
+<body>
+    <div class="connection-status disconnected" id="connection-status">
+        🔴 Disconnected
+    </div>
+
+    <div class="container">
+        <div class="header">
+            <h1>🎭 Claude Conductor</h1>
+            <p>Multi-Agent Orchestration Dashboard</p>
+        </div>
+
+        <div class="dashboard-grid">
+            <div class="card">
+                <h2>📊 System Statistics</h2>
+                <div class="stats-grid">
+                    <div class="stat-item">
+                        <div class="stat-value" id="tasks-completed">0</div>
+                        <div class="stat-label">Tasks Completed</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="tasks-failed">0</div>
+                        <div class="stat-label">Tasks Failed</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="avg-time">0.00</div>
+                        <div class="stat-label">Avg Time (s)</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="active-agents">0</div>
+                        <div class="stat-label">Active Agents</div>
+                    </div>
+                </div>
+                <div class="chart-container">
+                    📈 Task execution timeline (coming soon)
+                </div>
+            </div>
+
+            <div class="card">
+                <h2>🤖 Agent Status</h2>
+                <div class="agents-grid" id="agents-container">
+                    <div class="agent">
+                        <h4>No agents detected</h4>
+                        <p>Start the orchestrator to see agents</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="dashboard-grid">
+            <div class="card">
+                <h2>➕ Submit Task</h2>
+                <div class="task-form">
+                    <div class="form-group">
+                        <label for="task-type">Task Type:</label>
+                        <select id="task-type" class="form-control">
+                            <option value="generic">Generic Task</option>
+                            <option value="code_review">Code Review</option>
+                            <option value="refactor">Code Refactoring</option>
+                            <option value="test_generation">Test Generation</option>
+                            <option value="analysis">Code Analysis</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="task-description">Description:</label>
+                        <textarea id="task-description" class="form-control" rows="3" 
+                                  placeholder="Describe what you want to accomplish..."></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label for="task-files">Files (optional):</label>
+                        <input type="text" id="task-files" class="form-control" 
+                               placeholder="file1.py, file2.py, ...">
+                    </div>
+                    <div class="form-group">
+                        <label for="task-priority">Priority (1-10):</label>
+                        <input type="range" id="task-priority" min="1" max="10" value="5" class="form-control">
+                        <span id="priority-value">5</span>
+                    </div>
+                    <button class="btn" onclick="submitTask()">🚀 Submit Task</button>
+                </div>
+            </div>
+
+            <div class="card">
+                <h2>📝 Activity Log</h2>
+                <div class="activity-log" id="activity-log">
+                    [Loading] Dashboard initializing...\n
+                </div>
+                <div style="margin-top: 15px;">
+                    <button class="btn btn-warning" onclick="clearLog()">🗑️ Clear Log</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let ws = null;
+        let reconnectInterval = null;
+
+        // Update priority display
+        document.getElementById('task-priority').addEventListener('input', function(e) {
+            document.getElementById('priority-value').textContent = e.target.value;
+        });
+
+        function connectWebSocket() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}/ws`;
+            
+            ws = new WebSocket(wsUrl);
+            
+            ws.onopen = function() {
+                console.log('Connected to WebSocket');
+                updateConnectionStatus(true);
+                logActivity('Connected to orchestrator');
+                if (reconnectInterval) {
+                    clearInterval(reconnectInterval);
+                    reconnectInterval = null;
+                }
+            };
+            
+            ws.onmessage = function(event) {
+                try {
+                    const data = JSON.parse(event.data);
+                    updateDashboard(data);
+                } catch (e) {
+                    console.error('Error parsing WebSocket data:', e);
+                }
+            };
+            
+            ws.onclose = function() {
+                console.log('WebSocket connection closed');
+                updateConnectionStatus(false);
+                logActivity('Disconnected from orchestrator');
+                
+                // Attempt to reconnect
+                if (!reconnectInterval) {
+                    reconnectInterval = setInterval(() => {
+                        logActivity('Attempting to reconnect...');
+                        connectWebSocket();
+                    }, 5000);
+                }
+            };
+            
+            ws.onerror = function(error) {
+                console.error('WebSocket error:', error);
+                updateConnectionStatus(false);
+            };
+        }
+
+        function updateConnectionStatus(connected) {
+            const status = document.getElementById('connection-status');
+            if (connected) {
+                status.textContent = '🟢 Connected';
+                status.className = 'connection-status connected';
+            } else {
+                status.textContent = '🔴 Disconnected';
+                status.className = 'connection-status disconnected';
+            }
+        }
+
+        function updateDashboard(data) {
+            updateStats(data.stats);
+            updateAgents(data.agents);
+        }
+
+        function updateStats(stats) {
+            document.getElementById('tasks-completed').textContent = stats.tasks_completed || 0;
+            document.getElementById('tasks-failed').textContent = stats.tasks_failed || 0;
+            document.getElementById('avg-time').textContent = (stats.avg_execution_time || 0).toFixed(2);
+            
+            // Count active agents
+            const activeCount = Object.values(stats.agents || {}).filter(agent => agent.running).length;
+            document.getElementById('active-agents').textContent = activeCount;
+        }
+
+        function updateAgents(agents) {
+            const container = document.getElementById('agents-container');
+            container.innerHTML = '';
+
+            if (!agents || Object.keys(agents).length === 0) {
+                container.innerHTML = `
+                    <div class="agent">
+                        <h4>No agents detected</h4>
+                        <p>Start the orchestrator to see agents</p>
+                    </div>
+                `;
+                return;
+            }
+
+            for (const [agentId, info] of Object.entries(agents)) {
+                const agentEl = document.createElement('div');
+                let agentClass = 'agent';
+                let statusClass = 'status-stopped';
+                let statusText = 'Stopped';
+                
+                if (info.running) {
+                    if (info.current_task) {
+                        agentClass += ' busy';
+                        statusClass = 'status-busy';
+                        statusText = 'Busy';
+                    } else {
+                        statusClass = 'status-running';
+                        statusText = 'Running';
+                    }
+                } else {
+                    agentClass += ' offline';
+                }
+                
+                agentEl.className = agentClass;
+                agentEl.innerHTML = `
+                    <h4>${agentId}</h4>
+                    <div class="agent-status">
+                        <span>Status:</span>
+                        <span class="status-badge ${statusClass}">${statusText}</span>
+                    </div>
+                    <div class="agent-status">
+                        <span>Current Task:</span>
+                        <span>${info.current_task || 'None'}</span>
+                    </div>
+                    <div class="agent-status">
+                        <span>Health Failures:</span>
+                        <span>${info.health_check_failed || 0}</span>
+                    </div>
+                `;
+                container.appendChild(agentEl);
+            }
+        }
+
+        function logActivity(message) {
+            const log = document.getElementById('activity-log');
+            const timestamp = new Date().toLocaleTimeString();
+            log.textContent += `[${timestamp}] ${message}\n`;
+            log.scrollTop = log.scrollHeight;
+        }
+
+        function clearLog() {
+            document.getElementById('activity-log').textContent = '';
+            logActivity('Activity log cleared');
+        }
+
+        async function submitTask() {
+            const taskType = document.getElementById('task-type').value;
+            const description = document.getElementById('task-description').value.trim();
+            const filesInput = document.getElementById('task-files').value.trim();
+            const priority = parseInt(document.getElementById('task-priority').value);
+
+            if (!description) {
+                alert('Please enter a task description');
+                return;
+            }
+
+            const files = filesInput ? filesInput.split(',').map(f => f.trim()).filter(f => f) : [];
+
+            const taskData = {
+                task_type: taskType,
+                description: description,
+                files: files,
+                priority: priority
+            };
+
+            try {
+                const response = await fetch('/api/task', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(taskData)
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    logActivity(`Task submitted: ${taskType} - ${description} (Priority: ${priority})`);
+                    logActivity(`Task ${result.task_id} created with status: ${result.status}`);
+                    
+                    // Clear form
+                    document.getElementById('task-description').value = '';
+                    document.getElementById('task-files').value = '';
+                } else {
+                    logActivity(`Task submission failed: ${result.error}`);
+                    alert(`Task submission failed: ${result.error}`);
+                }
+            } catch (error) {
+                logActivity(`Error submitting task: ${error.message}`);
+                alert(`Error submitting task: ${error.message}`);
+            }
+        }
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', function() {
+            logActivity('Dashboard loaded');
+            connectWebSocket();
+        });
+
+        // Handle page visibility changes
+        document.addEventListener('visibilitychange', function() {
+            if (document.visibilityState === 'visible' && (!ws || ws.readyState === WebSocket.CLOSED)) {
+                connectWebSocket();
+            }
+        });
+    </script>
+</body>
+</html>

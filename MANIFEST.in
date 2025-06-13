@@ -1,0 +1,58 @@
+# Include documentation
+include README.md
+include LICENSE
+include CLAUDE.md
+include CHANGELOG.md
+
+# Include configuration files
+include requirements.txt
+include pyproject.toml
+include setup.py
+
+# Include scripts
+recursive-include scripts *.sh
+recursive-include scripts *.py
+
+# Include container configurations
+recursive-include containers *
+exclude containers/.env*
+
+# Include documentation
+recursive-include docs *.md
+recursive-include docs *.rst
+recursive-include docs *.txt
+
+# Include examples
+recursive-include examples *.py
+recursive-include examples *.md
+recursive-include examples *.yaml
+recursive-include examples *.yml
+
+# Include test configuration
+include pytest.ini
+include .coveragerc
+
+# Include GitHub workflows
+recursive-include .github *.yml
+recursive-include .github *.yaml
+
+# Exclude development and build artifacts
+global-exclude *.pyc
+global-exclude *.pyo
+global-exclude *.pyd
+global-exclude __pycache__
+global-exclude .git*
+global-exclude .DS_Store
+global-exclude *.so
+global-exclude .coverage
+global-exclude .pytest_cache
+prune build
+prune dist
+prune *.egg-info
+prune venv
+prune .venv
+prune logs
+prune workspace
+prune .mypy_cache
+prune .tox
+prune htmlcov
