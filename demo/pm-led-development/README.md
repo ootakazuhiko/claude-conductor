@@ -1,8 +1,12 @@
 # Claude Conductor - PM-Led Hierarchical Development Demo
 
+This demo demonstrates a hierarchical development team where a PM agent manages and directs other agents.
+
 このデモは、PMエージェントが他のエージェントを管理・指示する階層的な開発チームを実演します。
 
-## 🎯 デモの概要
+## 🎯 Demo Overview
+
+One PM (Project Manager) agent oversees four specialized development agents and manages the development project of a complete E-commerce platform.
 
 1つのPM（プロジェクトマネージャ）エージェントが4つの専門開発エージェントを統括し、完全なE-commerceプラットフォームの開発プロジェクトを管理します。
 

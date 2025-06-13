@@ -1,5 +1,14 @@
 # Claude Conductor - Isolated Workspaces
 
+## Overview
+
+The isolated workspace feature allows each agent to verify the operation of target development systems within independent Podman containers. This provides the following benefits:
+
+- **Complete Environment Isolation**: Each agent has its own filesystem, network, and process space
+- **Reproducibility**: The same environment can be reconstructed multiple times
+- **Safe Experimentation**: Code execution without affecting the host system
+- **Parallel Development**: Multiple different environments can run simultaneously
+
 ## 概要
 
 隔離されたワークスペース機能により、各エージェントが独立したPodmanコンテナ内で開発対象システムの動作確認を行えます。これにより、以下のメリットが得られます：

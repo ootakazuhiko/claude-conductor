@@ -1,6 +1,8 @@
 # Claude Conductor - Architecture Diagrams
 
-## Standalone Subset Architecture (単一PC版)
+## Standalone Subset Architecture
+
+## スタンドアロン・サブセット・アーキテクチャ（単一PC版）
 
 ```mermaid
 graph TB
@@ -11,7 +13,7 @@ graph TB
         end
         
         subgraph "Claude Conductor Core"
-            Orchestrator[Orchestrator<br/>タスク管理・分配]
+            Orchestrator[Orchestrator<br/>Task Management & Distribution]
             Dashboard[Web Dashboard<br/>FastAPI/HTTP Server]
             API[API Server<br/>REST API]
         end
@@ -29,8 +31,8 @@ graph TB
         end
         
         subgraph "Communication"
-            Queue[In-Memory Queue<br/>タスクキュー]
-            Socket[Unix Socket<br/>エージェント通信]
+            Queue[In-Memory Queue<br/>Task Queue]
+            Socket[Unix Socket<br/>Agent Communication]
         end
     end
     
@@ -68,6 +70,13 @@ graph TB
     style Logs fill:#f5f5f5
 ```
 
+### Standalone Features:
+- **Simple Configuration**: Complete on single machine
+- **Lightweight Resources**: 2GB memory, 0.5-2 CPU cores
+- **Local Storage**: File-based persistence
+- **In-Memory Queue**: Operation without Redis
+- **Mock Mode**: Mock implementation of Claude Code CLI
+
 ### Standalone版の特徴:
 - **シンプルな構成**: 単一マシンで完結
 - **軽量リソース**: メモリ2GB、CPU 0.5-2コア
@@ -85,7 +94,7 @@ graph TB
         subgraph "Docker Network: conductor-standalone"
             subgraph "Main Container"
                 ConductorContainer[claude-conductor-standalone<br/>Orchestrator + Dashboard]
-                Supervisor[Supervisor<br/>プロセス管理]
+                Supervisor[Supervisor<br/>Process Management]
             end
             
             subgraph "Optional Containers"
