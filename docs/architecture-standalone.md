@@ -202,46 +202,46 @@ graph TB
         ArgoCD[ArgoCD<br/>GitOps]
     end
     
-    Users -->|HTTPS| CloudProvider
-    CloudProvider -->|Load Balancer| Ingress
+    Users -->["HTTPS"] CloudProvider
+    CloudProvider -->["Load Balancer"] Ingress
     Ingress --> TLS
     TLS --> DashboardPod
     TLS --> APIPod
     
-    GitHub -->|Webhook| GitHubActions
-    GitHubActions -->|Build & Push| DockerHub
-    GitHubActions -->|Deploy| ArgoCD
-    ArgoCD -->|Sync| OrchestratorPod
-    ArgoCD -->|Sync| AgentRS
+    GitHub -->["Webhook"] GitHubActions
+    GitHubActions -->["Build & Push"] DockerHub
+    GitHubActions -->["Deploy"] ArgoCD
+    ArgoCD -->["Sync"] OrchestratorPod
+    ArgoCD -->["Sync"] AgentRS
     
-    OrchestratorPod <-->|gRPC| ServiceMesh
-    DashboardPod <-->|HTTP| ServiceMesh
-    APIPod <-->|REST| ServiceMesh
-    AgentRS <-->|gRPC| ServiceMesh
+    OrchestratorPod <-->["gRPC"] ServiceMesh
+    DashboardPod <-->["HTTP"] ServiceMesh
+    APIPod <-->["REST"] ServiceMesh
+    AgentRS <-->["gRPC"] ServiceMesh
     
     ServiceMesh --> mTLS
     
-    OrchestratorPod -->|Read/Write| Redis
-    OrchestratorPod -->|Read/Write| PostgreSQL
-    AgentRS -->|Read/Write| S3
+    OrchestratorPod -->["Read/Write"] Redis
+    OrchestratorPod -->["Read/Write"] PostgreSQL
+    AgentRS -->["Read/Write"] S3
     
     OrchestratorPod --> PVC1
     AgentRS --> PVC1
     OrchestratorPod --> PVC2
     OrchestratorPod --> PVC3
     
-    HPA -->|Scale| AgentRS
-    HPA <--|Metrics| Prometheus
+    HPA -->["Scale"] AgentRS
+    HPA <--["Metrics"] Prometheus
     
-    OrchestratorPod -->|Metrics| Prometheus
-    AgentRS -->|Metrics| Prometheus
+    OrchestratorPod -->["Metrics"] Prometheus
+    AgentRS -->["Metrics"] Prometheus
     Prometheus --> Grafana
     
-    OrchestratorPod -->|Logs| Loki
-    AgentRS -->|Logs| Loki
+    OrchestratorPod -->["Logs"] Loki
+    AgentRS -->["Logs"] Loki
     Loki --> Grafana
     
-    ServiceMesh -->|Traces| Jaeger
+    ServiceMesh -->["Traces"] Jaeger
     
     style Users fill:#e1f5fe
     style Ingress fill:#ffccbc
