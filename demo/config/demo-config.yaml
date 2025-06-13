@@ -1,0 +1,171 @@
+# Claude Conductor - Collaborative Development Demo Configuration
+# 4つの専門エージェントによる協調開発デモ
+
+# Orchestrator configuration
+orchestrator:
+  num_agents: 4
+  max_workers: 8
+  task_timeout: 600
+  log_level: INFO
+
+# Agent configuration
+agent:
+  container_memory: "2g"
+  container_cpu: "1.0"
+  health_check_interval: 30
+  startup_timeout: 60
+
+# Communication settings
+communication:
+  socket_path: "/tmp/claude_orchestrator.sock"
+  message_timeout: 10.0
+  retry_count: 3
+
+# Task queue settings
+task_queue:
+  max_size: 100
+  priority_levels: 10
+
+# Isolated workspace configuration
+isolated_workspace:
+  enabled: true
+  mode: "sandbox"
+  
+  # Agent container configuration
+  agent_containers:
+    base_image: "ubuntu:22.04"
+    persistent_volumes: true
+    volume_size: "5Gi"
+    
+    # Specialized environments for each agent role
+    environments:
+      - name: "backend-dev"
+        image: "python:3.11-slim"
+        packages:
+          - "flask"
+          - "flask-cors"
+          - "flask-sqlalchemy"
+          - "sqlalchemy"
+          - "black"
+          - "flake8"
+        volumes:
+          - "source:/workspace/src"
+          - "cache:/workspace/.cache"
+      
+      - name: "test-dev"
+        image: "python:3.11-slim"
+        packages:
+          - "pytest"
+          - "pytest-cov"
+          - "pytest-mock"
+          - "pytest-flask"
+          - "coverage"
+        volumes:
+          - "source:/workspace/src"
+          - "tests:/workspace/tests"
+      
+      - name: "devops"
+        image: "alpine:latest"
+        packages:
+          - "docker"
+          - "docker-compose"
+          - "git"
+          - "bash"
+          - "curl"
+          - "make"
+        volumes:
+          - "source:/workspace"
+          - "docker:/var/run/docker.sock"
+      
+      - name: "docs"
+        image: "python:3.11-slim"
+        packages:
+          - "sphinx"
+          - "mkdocs"
+          - "mkdocs-material"
+          - "pydoc-markdown"
+          - "markdown"
+        volumes:
+          - "source:/workspace"
+          - "docs:/workspace/docs"
+    
+    # Resource limits per agent
+    resources:
+      requests:
+        memory: "512Mi"
+        cpu: "0.5"
+      limits:
+        memory: "2Gi"
+        cpu: "1.0"
+
+# Podman configuration
+podman_config:
+  runtime: "podman"
+  socket_path: "/run/user/1000/podman/podman.sock"
+  
+  # Network configuration
+  network:
+    mode: "bridge"
+    name: "claude-demo-net"
+    subnet: "10.88.0.0/24"
+    enable_dns: true
+  
+  # Security settings
+  security:
+    userns: "keep-id"
+    seccomp_profile: "default"
+    drop_capabilities:
+      - "NET_ADMIN"
+      - "SYS_ADMIN"
+
+# Demo-specific settings
+demo:
+  project_name: "todo-api"
+  project_path: "demo/sample-project"
+  
+  # Agent roles
+  agents:
+    - id: "agent_000"
+      role: "Backend Developer"
+      specialization: "Flask, SQLAlchemy, API Development"
+      environment: "backend-dev"
+    
+    - id: "agent_001"
+      role: "Test Engineer"
+      specialization: "Pytest, Test Coverage, TDD"
+      environment: "test-dev"
+    
+    - id: "agent_002"
+      role: "DevOps Engineer"
+      specialization: "Docker, CI/CD, Deployment"
+      environment: "devops"
+    
+    - id: "agent_003"
+      role: "Documentation Specialist"
+      specialization: "API Documentation, User Guides"
+      environment: "docs"
+  
+  # Collaboration settings
+  collaboration:
+    enable_code_review: true
+    enable_pair_programming: false
+    share_workspace: true
+    communication_mode: "async"
+
+# Logging configuration for demo
+logging:
+  format: "%(asctime)s [%(levelname)8s] [%(name)s] %(message)s"
+  date_format: "%H:%M:%S"
+  console_output: true
+  file_output: true
+  json_format: false
+  
+  loggers:
+    conductor.orchestrator:
+      level: "INFO"
+    conductor.agent:
+      level: "INFO"
+    conductor.protocol:
+      level: "WARNING"
+    conductor.workspace_isolation:
+      level: "INFO"
