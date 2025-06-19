@@ -22,6 +22,11 @@ from .exceptions import (
     TaskExecutionError, TaskValidationError, TaskTimeoutError, ResourceError
 )
 from .error_handler import ErrorHandler, retry, CircuitBreaker
+from .task_decomposer import TaskDecomposer, ComplexityAnalysis
+from .coordination import CoordinationManager, CoordinationStrategy, LeadAgent, AgentCapability, AgentRole
+from .evaluator import LLMJudgeEvaluator, EvaluationTemplate, CriteriaDefinition
+from .token_optimizer import TokenOptimizer
+from .mcp_integration import MCPClient, MCPServer, MCPCapability, MCPRegistry
 
 logging.basicConfig(
     level=logging.INFO,
