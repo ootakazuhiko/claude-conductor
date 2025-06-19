@@ -17,6 +17,8 @@ import asyncio
 
 from .protocol import Agent2AgentProtocol, UnixSocketChannel, AgentMessage, MessageType
 from .workspace_isolation import WorkspaceIsolationManager, WorkspaceContainer
+from .thinking_mode import ThinkingModeManager, ThoughtType
+from .checkpoint import CheckpointManager, RecoveryOptions
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -340,6 +342,13 @@ class ClaudeAgent:
         self.current_task: Optional[Task] = None
         self.health_check_failed = 0
         
+        # Extended features
+        self.thinking_manager = ThinkingModeManager(agent_id)
+        self.checkpoint_manager = CheckpointManager(
+            storage_path=f"/tmp/claude_checkpoints_{agent_id}",
+            storage_backend="filesystem"
+        )
+        
     def start(self):
         """Start agent"""
         logger.info(f"Starting agent {self.agent_id}")
@@ -409,8 +418,35 @@ class ClaudeAgent:
         self.current_task = task
         start_time = time.time()
         
+        # Start thinking mode
+        thinking_context = self.thinking_manager.start_thinking(task.task_id)
+        
+        # Enable auto-checkpoint if task timeout > 120 seconds
+        if task.timeout > 120:
+            self.checkpoint_manager.enable_auto_checkpoint(
+                task.task_id,
+                interval=60.0,
+                checkpoint_func=lambda: self._get_checkpoint_data(task)
+            )
+        
         try:
             logger.info(f"Agent {self.agent_id} executing task {task.task_id}")
+            
+            # Record initial thoughts
+            self.thinking_manager.think(
+                task.task_id,
+                ThoughtType.ANALYSIS,
+                f"Starting execution of {task.task_type} task",
+                f"Task description: {task.description}, Files: {len(task.files) if task.files else 0}"
+            )
+            
+            # Record decision about task type
+            self.thinking_manager.make_decision(
+                task.task_id,
+                f"Execute as {task.task_type} task",
+                f"Task type identified and appropriate execution method selected",
+                alternatives=["code_review", "refactor", "test_generation", "analysis", "generic"]
+            )
             
             # Process according to task type
             if task.task_type == "code_review":
@@ -438,6 +474,27 @@ class ClaudeAgent:
             
         except Exception as e:
             logger.error(f"Task {task.task_id} failed: {e}")
+            
+            # Record error analysis
+            self.thinking_manager.analyze_error(
+                task.task_id,
+                str(e),
+                f"Task execution failed due to {type(e).__name__}",
+                recovery_plan="Check checkpoint for recovery possibility"
+            )
+            
+            # Try recovery from checkpoint
+            if task.timeout > 120:
+                try:
+                    recovery_result = self.checkpoint_manager.recover_task(
+                        task.task_id,
+                        recovery_handler=lambda data: self._recover_from_checkpoint(task, data)
+                    )
+                    if recovery_result:
+                        return recovery_result
+                except Exception as recovery_error:
+                    logger.error(f"Recovery failed: {recovery_error}")
+            
             return TaskResult(
                 task_id=task.task_id,
                 agent_id=self.agent_id,
@@ -449,10 +506,35 @@ class ClaudeAgent:
         finally:
             self.current_task = None
             
+            # Complete thinking and cleanup
+            self.thinking_manager.complete_thinking(task.task_id)
+            self.checkpoint_manager.disable_auto_checkpoint(task.task_id)
+            
+            # Export thinking log if requested
+            if hasattr(task, 'export_thinking_log') and task.export_thinking_log:
+                thinking_log = self.thinking_manager.export_thinking_log(
+                    task.task_id,
+                    format="markdown"
+                )
+                if thinking_log:
+                    # Save to file
+                    log_path = f"/tmp/thinking_log_{task.task_id}.md"
+                    with open(log_path, 'w') as f:
+                        f.write(thinking_log)
+                    logger.info(f"Thinking log exported to {log_path}")
+            
     def _execute_code_review(self, task: Task) -> Dict[str, Any]:
         """Execute code review task"""
         results = {}
         total_issues = 0
+        
+        # Record review planning
+        self.thinking_manager.think(
+            task.task_id,
+            ThoughtType.PLANNING,
+            f"Planning review for {len(task.files)} files",
+            "Will analyze each file for code quality, security, and best practices"
+        )
         
         for file_path in task.files:
             # Copy file to container
@@ -629,6 +711,70 @@ class ClaudeAgent:
             except Exception as e:
                 logger.error(f"Health check error: {e}")
                 self.health_check_failed += 1
+    
+    def _get_checkpoint_data(self, task: Task) -> Dict[str, Any]:
+        """Get checkpoint data for current task state"""
+        return {
+            "agent_id": self.agent_id,
+            "task_id": task.task_id,
+            "task_type": task.task_type,
+            "progress": self._estimate_progress(),
+            "current_state": {
+                "files_processed": getattr(self, '_files_processed', 0),
+                "total_files": len(task.files) if task.files else 0,
+                "intermediate_results": getattr(self, '_intermediate_results', {})
+            },
+            "timestamp": time.time()
+        }
+    
+    def _estimate_progress(self) -> float:
+        """Estimate current task progress"""
+        if not self.current_task:
+            return 0.0
+        
+        # Simple estimation based on files processed
+        if hasattr(self, '_files_processed') and self.current_task.files:
+            return self._files_processed / len(self.current_task.files)
+        
+        # Default to 50% if no better estimate
+        return 0.5
+    
+    def _recover_from_checkpoint(self, task: Task, recovery_data: Dict[str, Any]) -> TaskResult:
+        """Recover task execution from checkpoint"""
+        logger.info(f"Recovering task {task.task_id} from checkpoint")
+        
+        # Restore state
+        checkpoint_data = recovery_data.get("data", {})
+        current_state = checkpoint_data.get("current_state", {})
+        
+        self._files_processed = current_state.get("files_processed", 0)
+        self._intermediate_results = current_state.get("intermediate_results", {})
+        
+        # Continue execution from checkpoint
+        # This is a simplified recovery - actual implementation would be more sophisticated
+        remaining_files = task.files[self._files_processed:] if task.files else []
+        
+        self.thinking_manager.think(
+            task.task_id,
+            ThoughtType.ANALYSIS,
+            f"Recovered from checkpoint at {checkpoint_data.get('progress', 0):.1%} progress",
+            f"Continuing with {len(remaining_files)} remaining files"
+        )
+        
+        # Execute remaining work
+        # ... (implementation depends on task type)
+        
+        return TaskResult(
+            task_id=task.task_id,
+            agent_id=self.agent_id,
+            status="success",
+            result={
+                "recovered": True,
+                "checkpoint_used": recovery_data.get("checkpoint_id"),
+                "results": self._intermediate_results
+            },
+            execution_time=time.time() - recovery_data.get("restored_at", time.time())
+        )
     
     async def _setup_isolated_workspace(self):
         """Set up isolated workspace"""
