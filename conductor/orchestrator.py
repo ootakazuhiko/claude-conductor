@@ -10,7 +10,7 @@ import uuid
 import threading
 import yaml
 from typing import Dict, List, Optional, Any
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, asdict
 from concurrent.futures import ThreadPoolExecutor, Future
 import logging
 from datetime import datetime
@@ -22,6 +22,7 @@ from .exceptions import (
     TaskExecutionError, TaskValidationError, TaskTimeoutError, ResourceError
 )
 from .error_handler import ErrorHandler, retry, CircuitBreaker
+from .evaluator import LLMJudgeEvaluator, EvaluationResult
 
 logging.basicConfig(
     level=logging.INFO,
@@ -65,6 +66,10 @@ class Orchestrator:
             timeout=30.0,
             expected_exception=AgentStartupError
         )
+        
+        # LLM-as-judge evaluator
+        self.evaluator = LLMJudgeEvaluator()
+        self.enable_evaluation = self.config.get("enable_evaluation", True)
         
     def _load_config(self, config_path: Optional[str]) -> Dict[str, Any]:
         """Load configuration file with proper error handling"""
@@ -358,6 +363,19 @@ class Orchestrator:
             
             self._update_stats(result)
             self.results[task.task_id] = result
+            
+            # Evaluate task result if evaluation is enabled
+            if self.enable_evaluation and result.status == "success":
+                try:
+                    # Schedule evaluation in background
+                    threading.Thread(
+                        target=self._run_evaluation,
+                        args=(task, result),
+                        daemon=True
+                    ).start()
+                except Exception as e:
+                    logger.error(f"Failed to schedule evaluation for task {task.task_id}: {e}")
+            
             return result
             
         except Exception as e:
@@ -511,7 +529,7 @@ class Orchestrator:
     def get_statistics(self) -> Dict[str, Any]:
         """Get orchestrator execution statistics"""
         runtime = time.time() - self.stats["start_time"] if self.stats["start_time"] else 0
-        return {
+        stats = {
             "runtime": runtime,
             "tasks_completed": self.stats["tasks_completed"],
             "tasks_failed": self.stats["tasks_failed"],
@@ -519,6 +537,67 @@ class Orchestrator:
             "total_execution_time": self.stats["total_execution_time"],
             "active_agents": len([a for a in self.agents.values() if a.is_running]),
             "total_agents": len(self.agents)
+        }
+        
+        # Add evaluation statistics if available
+        if hasattr(self, 'evaluator'):
+            stats["evaluation"] = self.evaluator.get_statistics()
+        
+        return stats
+    
+    def _run_evaluation(self, task: Task, result: TaskResult):
+        """Run evaluation in background thread"""
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            evaluation_result = loop.run_until_complete(
+                self._evaluate_task_result(task, result)
+            )
+            logger.info(f"Task {task.task_id} evaluated with score {evaluation_result.overall_score:.1f}")
+        except Exception as e:
+            logger.error(f"Failed to evaluate task {task.task_id}: {e}")
+        finally:
+            loop.close()
+    
+    async def _evaluate_task_result(self, task: Task, result: TaskResult) -> EvaluationResult:
+        """Evaluate task result using LLM-as-judge"""
+        # Prepare task input data
+        task_input = {
+            "task_type": task.task_type,
+            "description": task.description,
+            "files": task.files,
+            "priority": task.priority,
+            "timeout": task.timeout
+        }
+        
+        # Prepare task output data
+        task_output = {
+            "status": result.status,
+            "result": result.result,
+            "error": result.error,
+            "execution_time": result.execution_time
+        }
+        
+        return await self.evaluator.evaluate_task_result(
+            task_id=task.task_id,
+            agent_id=result.agent_id,
+            task_input=task_input,
+            task_output=task_output,
+            task_type=task.task_type
+        )
+    
+    def get_evaluation_report(self, agent_id: Optional[str] = None, task_type: Optional[str] = None) -> Dict[str, Any]:
+        """Get evaluation report for agents and task types"""
+        if not hasattr(self, 'evaluator'):
+            return {"error": "Evaluation system not enabled"}
+        
+        history = self.evaluator.get_evaluation_history(agent_id=agent_id, task_type=task_type, limit=50)
+        trends = self.evaluator.analyze_quality_trends()
+        
+        return {
+            "evaluation_history": [asdict(eval_result) for eval_result in history],
+            "quality_trends": [asdict(trend) for trend in trends],
+            "statistics": self.evaluator.get_statistics()
         }
 
 def create_task(task_type: str = "generic", description: str = "", files: List[str] = None, **kwargs) -> Task:
