@@ -187,6 +187,20 @@ class Orchestrator:
                 
         logger.info(f"Orchestrator started with {successful_agents}/{self.config['num_agents']} active agents")
         
+        # Register agents with coordination manager
+        for agent_id, agent in self.agents.items():
+            capability = AgentCapability(
+                agent_id=agent_id,
+                role=AgentRole.SUB,
+                skills={"execution", "analysis", "testing"},
+                performance_score=1.0
+            )
+            self.coordination_manager.register_agent(agent, capability)
+        
+        # Create lead agents if configured
+        if self.config.get("enable_hierarchical_coordination", False):
+            self._setup_hierarchical_teams()
+        
         # Start statistics reporter thread
         threading.Thread(target=self._stats_reporter, daemon=True).start()
         
