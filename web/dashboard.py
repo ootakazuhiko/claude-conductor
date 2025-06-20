@@ -11,10 +11,12 @@ from typing import Dict, Any, Optional
 from pathlib import Path
 
 try:
-    from fastapi import FastAPI, WebSocket, Request
-    from fastapi.responses import HTMLResponse
+    from fastapi import FastAPI, WebSocket, Request, Depends, HTTPException, status
+    from fastapi.responses import HTMLResponse, JSONResponse
     from fastapi.staticfiles import StaticFiles
     from fastapi.templating import Jinja2Templates
+    from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+    from fastapi.middleware.cors import CORSMiddleware
     import uvicorn
     FASTAPI_AVAILABLE = True
 except ImportError:
@@ -29,6 +31,11 @@ import webbrowser
 from urllib.parse import urlparse
 
 from conductor import Orchestrator, create_task
+from conductor.secure_orchestrator import SecureOrchestrator, SecureTaskRequest, SecureTaskResult
+from conductor.security import SecurityManager, SecurityConfig, User, Permission, UserRole
+from conductor.evaluator import EvaluationManager
+from conductor.token_optimizer import TokenOptimizer
+from conductor.mcp_integration import MCPIntegration
 
 
 class DashboardData:
@@ -36,21 +43,48 @@ class DashboardData:
     
     def __init__(self):
         self.orchestrator: Optional[Orchestrator] = None
+        self.secure_orchestrator: Optional[SecureOrchestrator] = None
         self.stats_history = []
         self.max_history = 100
         self.last_update = time.time()
+        self.evaluation_manager: Optional[EvaluationManager] = None
+        self.token_optimizer: Optional[TokenOptimizer] = None
+        self.mcp_integration: Optional[MCPIntegration] = None
+        self.security_enabled = False
     
     def update_stats(self):
         """Update statistics from orchestrator"""
-        if not self.orchestrator:
+        active_orchestrator = self.secure_orchestrator or self.orchestrator
+        if not active_orchestrator:
             return
         
-        stats = self.orchestrator.get_statistics()
-        agent_status = self.orchestrator.get_agent_status()
+        stats = active_orchestrator.get_statistics()
+        agent_status = active_orchestrator.get_agent_status()
         
         # Add timestamp
         stats['timestamp'] = time.time()
         stats['agents'] = agent_status
+        
+        # Add security stats if available
+        if self.secure_orchestrator:
+            security_status = self.secure_orchestrator.get_security_statistics("mock_admin_token")
+            if not security_status.get('error'):
+                stats['security'] = security_status
+        
+        # Add evaluation stats
+        if self.evaluation_manager:
+            stats['evaluation'] = self.evaluation_manager.get_evaluation_summary()
+        
+        # Add token usage stats
+        if self.token_optimizer:
+            stats['token_usage'] = self.token_optimizer.get_usage_summary()
+        
+        # Add MCP integration stats
+        if self.mcp_integration:
+            stats['mcp'] = {
+                'servers_connected': len(self.mcp_integration.connected_servers),
+                'tools_available': len(self.mcp_integration.get_available_tools())
+            }
         
         # Add to history
         self.stats_history.append(stats)
@@ -82,13 +116,41 @@ class DashboardData:
 dashboard_data = DashboardData()
 
 
+# Security dependency
+security = HTTPBearer(auto_error=False)
+
+async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> Optional[User]:
+    """Get current user from JWT token"""
+    if not dashboard_data.security_enabled or not dashboard_data.secure_orchestrator:
+        return None
+    
+    if not credentials:
+        return None
+    
+    user = dashboard_data.secure_orchestrator.verify_token(credentials.credentials)
+    return user
+
 # FastAPI Dashboard (if available)
 if FASTAPI_AVAILABLE:
-    app = FastAPI(title="Claude Conductor Dashboard", version="1.0.0")
+    app = FastAPI(
+        title="Claude Conductor Dashboard", 
+        version="2.0.0",
+        description="Multi-Agent Orchestration Dashboard with Security"
+    )
+    
+    # Add CORS middleware
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],  # Configure appropriately for production
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
     
     # Setup static files and templates
     web_dir = Path(__file__).parent
-    app.mount("/static", StaticFiles(directory=web_dir / "static"), name="static")
+    if (web_dir / "static").exists():
+        app.mount("/static", StaticFiles(directory=web_dir / "static"), name="static")
     templates = Jinja2Templates(directory=web_dir / "templates")
     
     @app.get("/", response_class=HTMLResponse)
@@ -96,10 +158,38 @@ if FASTAPI_AVAILABLE:
         """Main dashboard page"""
         return templates.TemplateResponse("dashboard.html", {"request": request})
     
+    @app.post("/api/auth/login")
+    async def login(credentials: dict):
+        """User authentication"""
+        if not dashboard_data.secure_orchestrator:
+            raise HTTPException(status_code=501, detail="Security not enabled")
+        
+        username = credentials.get("username")
+        password = credentials.get("password")
+        
+        if not username or not password:
+            raise HTTPException(status_code=400, detail="Username and password required")
+        
+        token = dashboard_data.secure_orchestrator.authenticate_user(username, password)
+        if not token:
+            raise HTTPException(status_code=401, detail="Invalid credentials")
+        
+        return {"access_token": token, "token_type": "bearer"}
+    
     @app.get("/api/status")
-    async def get_status():
+    async def get_status(current_user: Optional[User] = Depends(get_current_user)):
         """Get current system status"""
-        return dashboard_data.get_current_data()
+        data = dashboard_data.get_current_data()
+        
+        # Add user info if authenticated
+        if current_user:
+            data['user'] = {
+                'username': current_user.username,
+                'roles': [role.value for role in current_user.roles],
+                'permissions': [perm.value for perm in current_user.permissions]
+            }
+        
+        return data
     
     @app.get("/api/agents")
     async def get_agents():
@@ -109,10 +199,14 @@ if FASTAPI_AVAILABLE:
         return {}
     
     @app.post("/api/task")
-    async def submit_task(task_data: dict):
+    async def submit_task(
+        task_data: dict, 
+        current_user: Optional[User] = Depends(get_current_user)
+    ):
         """Submit a new task"""
-        if not dashboard_data.orchestrator:
-            return {"error": "Orchestrator not running"}
+        active_orchestrator = dashboard_data.secure_orchestrator or dashboard_data.orchestrator
+        if not active_orchestrator:
+            raise HTTPException(status_code=503, detail="Orchestrator not running")
         
         try:
             task = create_task(
@@ -122,10 +216,68 @@ if FASTAPI_AVAILABLE:
                 priority=task_data.get("priority", 5)
             )
             
-            result = dashboard_data.orchestrator.execute_task(task)
-            return {"success": True, "task_id": result.task_id, "status": result.status}
+            # Use secure orchestrator if available and user is authenticated
+            if dashboard_data.secure_orchestrator and current_user:
+                # Get auth token from request headers
+                auth_token = task_data.get("auth_token")  # This would come from frontend
+                result = dashboard_data.secure_orchestrator.execute_secure_task(
+                    task, auth_token=auth_token
+                )
+                return {
+                    "success": result.authorized, 
+                    "task_id": result.task_result.task_id, 
+                    "status": result.task_result.status,
+                    "authorized": result.authorized
+                }
+            else:
+                result = active_orchestrator.execute_task(task)
+                return {"success": True, "task_id": result.task_id, "status": result.status}
+                
         except Exception as e:
-            return {"error": str(e)}
+            raise HTTPException(status_code=500, detail=str(e))
+    
+    @app.get("/api/security/stats")
+    async def get_security_stats(
+        current_user: Optional[User] = Depends(get_current_user)
+    ):
+        """Get security statistics (admin only)"""
+        if not dashboard_data.secure_orchestrator:
+            raise HTTPException(status_code=501, detail="Security not enabled")
+        
+        if not current_user or not current_user.has_role(UserRole.ADMIN):
+            raise HTTPException(status_code=403, detail="Admin access required")
+        
+        # Mock admin token for this demo
+        stats = dashboard_data.secure_orchestrator.get_security_statistics("mock_admin_token")
+        return stats
+    
+    @app.get("/api/evaluation/reports")
+    async def get_evaluation_reports(
+        current_user: Optional[User] = Depends(get_current_user)
+    ):
+        """Get evaluation reports"""
+        if not dashboard_data.evaluation_manager:
+            return {"reports": []}
+        
+        reports = dashboard_data.evaluation_manager.get_recent_evaluations(limit=20)
+        return {"reports": [report.__dict__ for report in reports]}
+    
+    @app.get("/api/tokens/usage")
+    async def get_token_usage(
+        current_user: Optional[User] = Depends(get_current_user)
+    ):
+        """Get token usage statistics"""
+        if not dashboard_data.token_optimizer:
+            return {"usage": {}, "cost_breakdown": {}}
+        
+        usage = dashboard_data.token_optimizer.get_usage_summary()
+        cost_breakdown = dashboard_data.token_optimizer.get_cost_breakdown()
+        
+        return {
+            "usage": usage,
+            "cost_breakdown": cost_breakdown,
+            "optimization_suggestions": dashboard_data.token_optimizer.get_optimization_suggestions()
+        }
     
     @app.websocket("/ws")
     async def websocket_endpoint(websocket: WebSocket):
@@ -136,10 +288,15 @@ if FASTAPI_AVAILABLE:
             while True:
                 # Send current data
                 data = dashboard_data.get_current_data()
-                await websocket.send_text(json.dumps(data))
                 
-                # Wait for 2 seconds before next update
-                await asyncio.sleep(2)
+                # Add timestamp for real-time updates
+                data['server_time'] = datetime.now().isoformat()
+                data['uptime'] = time.time() - dashboard_data.last_update if dashboard_data.last_update else 0
+                
+                await websocket.send_text(json.dumps(data, default=str))
+                
+                # Wait for 3 seconds before next update
+                await asyncio.sleep(3)
                 
                 # Update stats
                 dashboard_data.update_stats()
@@ -404,9 +561,27 @@ class SimpleDashboardServer:
             self.server.server_close()
 
 
-def run_dashboard(orchestrator: Optional[Orchestrator] = None, port: int = 8080, open_browser: bool = True):
+def run_dashboard(
+    orchestrator: Optional[Orchestrator] = None, 
+    secure_orchestrator: Optional[SecureOrchestrator] = None,
+    port: int = 8080, 
+    open_browser: bool = True,
+    enable_security: bool = False
+):
     """Run the dashboard"""
-    if orchestrator:
+    if secure_orchestrator:
+        dashboard_data.secure_orchestrator = secure_orchestrator
+        dashboard_data.security_enabled = True
+        
+        # Initialize additional components
+        try:
+            dashboard_data.evaluation_manager = EvaluationManager()
+            dashboard_data.token_optimizer = TokenOptimizer()
+            dashboard_data.mcp_integration = MCPIntegration()
+            print("Enhanced features initialized: Evaluation, Token Optimization, MCP Integration")
+        except Exception as e:
+            print(f"Warning: Could not initialize enhanced features: {e}")
+    elif orchestrator:
         dashboard_data.orchestrator = orchestrator
     
     if FASTAPI_AVAILABLE:
@@ -438,19 +613,38 @@ if __name__ == "__main__":
     parser.add_argument("--port", type=int, default=8080, help="Port to run dashboard on")
     parser.add_argument("--no-browser", action="store_true", help="Don't open browser automatically")
     parser.add_argument("--with-orchestrator", action="store_true", help="Start with orchestrator")
+    parser.add_argument("--secure", action="store_true", help="Start with secure orchestrator")
+    parser.add_argument("--config", help="Configuration file path")
     
     args = parser.parse_args()
     
     orchestrator = None
-    if args.with_orchestrator:
-        print("Starting orchestrator...")
-        orchestrator = Orchestrator()
+    secure_orchestrator = None
+    
+    if args.secure:
+        print("Starting secure orchestrator...")
+        from conductor.security import DEFAULT_SECURITY_CONFIG
+        secure_orchestrator = SecureOrchestrator(args.config, DEFAULT_SECURITY_CONFIG)
+        secure_orchestrator.config["num_agents"] = 2
+        secure_orchestrator.start()
+    elif args.with_orchestrator:
+        print("Starting standard orchestrator...")
+        orchestrator = Orchestrator(args.config)
         orchestrator.config["num_agents"] = 2
         orchestrator.start()
     
     try:
-        run_dashboard(orchestrator, args.port, not args.no_browser)
+        run_dashboard(
+            orchestrator=orchestrator,
+            secure_orchestrator=secure_orchestrator,
+            port=args.port, 
+            open_browser=not args.no_browser,
+            enable_security=args.secure
+        )
     finally:
-        if orchestrator:
+        if secure_orchestrator:
+            print("Stopping secure orchestrator...")
+            secure_orchestrator.stop()
+        elif orchestrator:
             print("Stopping orchestrator...")
             orchestrator.stop()
