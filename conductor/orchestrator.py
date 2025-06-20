@@ -22,6 +22,7 @@ from .exceptions import (
     TaskExecutionError, TaskValidationError, TaskTimeoutError, ResourceError
 )
 from .error_handler import ErrorHandler, retry, CircuitBreaker
+from .security import SecurityManager, SecurityConfig, Permission, UserRole
 
 logging.basicConfig(
     level=logging.INFO,
@@ -65,6 +66,17 @@ class Orchestrator:
             timeout=30.0,
             expected_exception=AgentStartupError
         )
+        
+        # Security manager (optional, disabled by default)
+        self.security_manager = None
+        if self.config.get("security_enabled", False):
+            security_config = SecurityConfig(
+                jwt_secret=self.config.get("security", {}).get("jwt_secret", "default-secret"),
+                jwt_expiration_hours=self.config.get("security", {}).get("jwt_expiration_hours", 24),
+                audit_log_enabled=self.config.get("security", {}).get("audit_enabled", True)
+            )
+            self.security_manager = SecurityManager(security_config)
+            logger.info("Security manager initialized")
         
     def _load_config(self, config_path: Optional[str]) -> Dict[str, Any]:
         """Load configuration file with proper error handling"""
@@ -519,6 +531,24 @@ class Orchestrator:
             "total_execution_time": self.stats["total_execution_time"],
             "active_agents": len([a for a in self.agents.values() if a.is_running]),
             "total_agents": len(self.agents)
+        }
+        
+        # Add security statistics if security is enabled
+        if self.security_manager:
+            stats["security"] = self.security_manager.get_security_stats()
+        
+        return stats
+    
+    def get_security_status(self) -> Dict[str, Any]:
+        """セキュリティ状態を取得"""
+        if not self.security_manager:
+            return {"security_enabled": False}
+        
+        return {
+            "security_enabled": True,
+            "security_stats": self.security_manager.get_security_stats(),
+            "audit_enabled": self.security_manager.config.audit_log_enabled,
+            "recent_audit_events": len(self.security_manager.audit_logger.audit_log)
         }
 
 def create_task(task_type: str = "generic", description: str = "", files: List[str] = None, **kwargs) -> Task:
