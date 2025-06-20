@@ -1,0 +1,453 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: velero-backup-config
+  namespace: claude-conductor
+  labels:
+    app.kubernetes.io/name: claude-conductor
+    app.kubernetes.io/component: backup
+data:
+  backup-script.sh: |
+    #!/bin/bash
+    set -euo pipefail
+    
+    echo "Starting Claude Conductor backup..."
+    
+    # Create namespace backup
+    velero backup create claude-conductor-namespace-$(date +%Y%m%d-%H%M%S) \
+      --include-namespaces claude-conductor \
+      --storage-location default \
+      --volume-snapshot-locations default \
+      --ttl 168h0m0s
+    
+    # Create application data backup
+    velero backup create claude-conductor-data-$(date +%Y%m%d-%H%M%S) \
+      --include-namespaces claude-conductor \
+      --include-resources pv,pvc \
+      --storage-location default \
+      --volume-snapshot-locations default \
+      --ttl 720h0m0s
+    
+    echo "Backup completed successfully"
+  
+  restore-script.sh: |
+    #!/bin/bash
+    set -euo pipefail
+    
+    BACKUP_NAME=${1:-""}
+    if [ -z "$BACKUP_NAME" ]; then
+      echo "Usage: $0 <backup-name>"
+      exit 1
+    fi
+    
+    echo "Starting Claude Conductor restore from backup: $BACKUP_NAME"
+    
+    # Stop current deployment
+    kubectl scale deployment claude-conductor-orchestrator --replicas=0 -n claude-conductor
+    kubectl scale deployment claude-conductor-agents --replicas=0 -n claude-conductor
+    
+    # Wait for pods to terminate
+    kubectl wait --for=delete pods --all -n claude-conductor --timeout=300s
+    
+    # Restore from backup
+    velero restore create claude-conductor-restore-$(date +%Y%m%d-%H%M%S) \
+      --from-backup $BACKUP_NAME \
+      --wait
+    
+    # Verify restore
+    kubectl get pods -n claude-conductor
+    kubectl get pvc -n claude-conductor
+    
+    echo "Restore completed successfully"
+
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: claude-conductor-backup
+  namespace: claude-conductor
+  labels:
+    app.kubernetes.io/name: claude-conductor
+    app.kubernetes.io/component: backup
+spec:
+  schedule: "0 2 * * *"  # Daily at 2 AM
+  timeZone: "UTC"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: claude-conductor
+            app.kubernetes.io/component: backup-job
+        spec:
+          serviceAccountName: claude-conductor-backup
+          restartPolicy: OnFailure
+          containers:
+          - name: backup
+            image: velero/velero:v1.12
+            command:
+            - /bin/bash
+            - /scripts/backup-script.sh
+            env:
+            - name: BACKUP_RETENTION_DAYS
+              value: "30"
+            - name: AWS_REGION
+              value: "us-west-2"
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: velero-credentials
+                  key: aws-access-key-id
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: velero-credentials
+                  key: aws-secret-access-key
+            volumeMounts:
+            - name: backup-scripts
+              mountPath: /scripts
+            resources:
+              requests:
+                cpu: "100m"
+                memory: "256Mi"
+              limits:
+                cpu: "500m"
+                memory: "512Mi"
+          volumes:
+          - name: backup-scripts
+            configMap:
+              name: velero-backup-config
+              defaultMode: 0755
+
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: claude-conductor-data-backup
+  namespace: claude-conductor
+  labels:
+    app.kubernetes.io/name: claude-conductor
+    app.kubernetes.io/component: data-backup
+spec:
+  schedule: "0 */6 * * *"  # Every 6 hours
+  timeZone: "UTC"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 5
+  failedJobsHistoryLimit: 2
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: claude-conductor
+            app.kubernetes.io/component: data-backup-job
+        spec:
+          serviceAccountName: claude-conductor-backup
+          restartPolicy: OnFailure
+          containers:
+          - name: redis-backup
+            image: redis:7-alpine
+            command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              echo "Starting Redis backup..."
+              
+              # Create Redis backup
+              redis-cli -h claude-conductor-redis -p 6379 \
+                --rdb /backup/redis-backup-$(date +%Y%m%d-%H%M%S).rdb \
+                BGSAVE
+              
+              # Wait for backup to complete
+              while [ $(redis-cli -h claude-conductor-redis -p 6379 LASTSAVE) -eq $(redis-cli -h claude-conductor-redis -p 6379 LASTSAVE) ]; do
+                sleep 1
+              done
+              
+              # Upload to S3 or other storage
+              aws s3 cp /backup/redis-backup-$(date +%Y%m%d-%H%M%S).rdb \
+                s3://claude-conductor-backups/redis/
+              
+              echo "Redis backup completed"
+            env:
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: claude-conductor-secrets
+                  key: redis-password
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: velero-credentials
+                  key: aws-access-key-id
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: velero-credentials
+                  key: aws-secret-access-key
+            volumeMounts:
+            - name: backup-storage
+              mountPath: /backup
+            resources:
+              requests:
+                cpu: "100m"
+                memory: "256Mi"
+              limits:
+                cpu: "500m"
+                memory: "1Gi"
+          
+          - name: workspace-backup
+            image: alpine:latest
+            command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              echo "Starting workspace backup..."
+              
+              # Install required tools
+              apk add --no-cache tar gzip aws-cli
+              
+              # Create workspace archive
+              cd /workspace
+              tar -czf /backup/workspace-backup-$(date +%Y%m%d-%H%M%S).tar.gz .
+              
+              # Upload to S3
+              aws s3 cp /backup/workspace-backup-$(date +%Y%m%d-%H%M%S).tar.gz \
+                s3://claude-conductor-backups/workspace/
+              
+              echo "Workspace backup completed"
+            env:
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: velero-credentials
+                  key: aws-access-key-id
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: velero-credentials
+                  key: aws-secret-access-key
+            volumeMounts:
+            - name: workspace
+              mountPath: /workspace
+              readOnly: true
+            - name: backup-storage
+              mountPath: /backup
+            resources:
+              requests:
+                cpu: "100m"
+                memory: "256Mi"
+              limits:
+                cpu: "500m"
+                memory: "1Gi"
+          
+          volumes:
+          - name: workspace
+            persistentVolumeClaim:
+              claimName: claude-conductor-workspace
+          - name: backup-storage
+            emptyDir:
+              sizeLimit: 10Gi
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: claude-conductor-backup
+  namespace: claude-conductor
+  labels:
+    app.kubernetes.io/name: claude-conductor
+    app.kubernetes.io/component: backup
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: claude-conductor-backup
+  labels:
+    app.kubernetes.io/name: claude-conductor
+    app.kubernetes.io/component: backup
+rules:
+- apiGroups: [""]
+  resources: ["*"]
+  verbs: ["*"]
+- apiGroups: ["apps"]
+  resources: ["*"]
+  verbs: ["*"]
+- apiGroups: ["velero.io"]
+  resources: ["*"]
+  verbs: ["*"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: claude-conductor-backup
+  labels:
+    app.kubernetes.io/name: claude-conductor
+    app.kubernetes.io/component: backup
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: claude-conductor-backup
+subjects:
+- kind: ServiceAccount
+  name: claude-conductor-backup
+  namespace: claude-conductor
+
+---
+# Disaster Recovery Runbook ConfigMap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: claude-conductor-dr-runbook
+  namespace: claude-conductor
+  labels:
+    app.kubernetes.io/name: claude-conductor
+    app.kubernetes.io/component: disaster-recovery
+data:
+  disaster-recovery.md: |
+    # Claude Conductor Disaster Recovery Runbook
+    
+    ## Overview
+    This runbook provides step-by-step procedures for recovering Claude Conductor
+    from various disaster scenarios.
+    
+    ## Scenarios
+    
+    ### 1. Complete Cluster Failure
+    
+    **Detection:**
+    - All nodes in the cluster are unreachable
+    - Kubernetes API is not responding
+    - Applications are completely unavailable
+    
+    **Recovery Steps:**
+    1. Provision new Kubernetes cluster
+    2. Install Velero in the new cluster
+    3. Configure access to backup storage location
+    4. Restore from latest backup:
+       ```bash
+       velero restore create claude-conductor-cluster-restore \
+         --from-backup claude-conductor-namespace-YYYYMMDD-HHMMSS
+       ```
+    5. Verify all services are running
+    6. Check data integrity
+    
+    **Estimated RTO:** 2-4 hours
+    **Estimated RPO:** 24 hours (daily backups)
+    
+    ### 2. Redis Data Loss
+    
+    **Detection:**
+    - Redis pods are running but data is missing
+    - Applications report "no data found" errors
+    - Redis backup verification fails
+    
+    **Recovery Steps:**
+    1. Stop all orchestrator and agent pods
+    2. Scale down Redis deployment
+    3. Restore Redis data from latest backup
+    4. Start Redis deployment
+    5. Verify data integrity
+    6. Start orchestrator and agent pods
+    
+    **Estimated RTO:** 30 minutes
+    **Estimated RPO:** 6 hours (backup every 6 hours)
+    
+    ### 3. Workspace Data Corruption
+    
+    **Detection:**
+    - Tasks are failing with file system errors
+    - Workspace PVC shows corruption
+    - File integrity checks fail
+    
+    **Recovery Steps:**
+    1. Scale down all agent pods
+    2. Create new PVC for workspace
+    3. Restore workspace data from backup
+    4. Update deployment to use new PVC
+    5. Scale up agent pods
+    6. Verify task execution
+    
+    **Estimated RTO:** 1 hour
+    **Estimated RPO:** 6 hours
+    
+    ### 4. Network Partition
+    
+    **Detection:**
+    - Some nodes are unreachable
+    - Split-brain scenarios in leader election
+    - Inconsistent state across nodes
+    
+    **Recovery Steps:**
+    1. Identify affected nodes
+    2. Drain and cordon affected nodes
+    3. Ensure leader election selects healthy node
+    4. Verify Redis connectivity
+    5. Monitor for split-brain resolution
+    6. Gradually bring nodes back online
+    
+    **Estimated RTO:** 15-30 minutes
+    **Estimated RPO:** None (no data loss expected)
+    
+    ## Backup Verification
+    
+    Weekly backup verification should include:
+    1. Restore to test environment
+    2. Verify all data is present
+    3. Run functional tests
+    4. Document any issues
+    
+    ## Emergency Contacts
+    
+    - On-call Engineer: +1-xxx-xxx-xxxx
+    - Platform Team: platform-team@company.com
+    - Security Team: security@company.com
+    
+    ## Recovery Validation Checklist
+    
+    After any recovery:
+    - [ ] All pods are running and healthy
+    - [ ] Redis connectivity is working
+    - [ ] Leader election is functioning
+    - [ ] Task execution is working
+    - [ ] Web dashboard is accessible
+    - [ ] Metrics are being collected
+    - [ ] Backup jobs are scheduled
+    - [ ] No security alerts
+    - [ ] Performance is within normal ranges
+  
+  test-disaster-recovery.sh: |
+    #!/bin/bash
+    set -euo pipefail
+    
+    echo "Starting disaster recovery test..."
+    
+    # Test 1: Verify backup existence
+    echo "Checking for recent backups..."
+    velero backup get | grep claude-conductor | head -5
+    
+    # Test 2: Test backup restore (dry run)
+    echo "Testing backup restore (dry run)..."
+    LATEST_BACKUP=$(velero backup get --output json | jq -r '.items[0].metadata.name')
+    velero restore create test-restore-$(date +%Y%m%d-%H%M%S) \
+      --from-backup $LATEST_BACKUP \
+      --dry-run
+    
+    # Test 3: Verify Redis backup
+    echo "Verifying Redis backup..."
+    kubectl exec -n claude-conductor claude-conductor-redis-0 -- \
+      redis-cli ping
+    
+    # Test 4: Test workspace backup
+    echo "Testing workspace backup..."
+    kubectl exec -n claude-conductor \
+      $(kubectl get pods -n claude-conductor -l app.kubernetes.io/component=orchestrator -o jsonpath='{.items[0].metadata.name}') -- \
+      ls -la /workspace
+    
+    echo "Disaster recovery test completed successfully"

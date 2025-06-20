@@ -1,0 +1,742 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: claude-conductor-orchestrator
+  namespace: claude-conductor
+  labels:
+    app.kubernetes.io/name: claude-conductor
+    app.kubernetes.io/component: orchestrator
+    app.kubernetes.io/version: "2.0.0"
+    app.kubernetes.io/part-of: claude-conductor
+    app.kubernetes.io/managed-by: kubernetes
+spec:
+  replicas: 3  # High availability with leader election
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: claude-conductor
+      app.kubernetes.io/component: orchestrator
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: claude-conductor
+        app.kubernetes.io/component: orchestrator
+        app.kubernetes.io/version: "2.0.0"
+        app.kubernetes.io/part-of: claude-conductor
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+        prometheus.io/path: "/metrics"
+        fluentd.io/include: "true"
+        # Istio sidecar injection for service mesh
+        sidecar.istio.io/inject: "true"
+        # Pod security annotations
+        container.apparmor.security.beta.kubernetes.io/orchestrator: runtime/default
+    spec:
+      serviceAccountName: claude-conductor
+      automountServiceAccountToken: true
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+        supplementalGroups: [1000]
+      # High availability and performance optimizations
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+              - key: app.kubernetes.io/component
+                operator: In
+                values:
+                - orchestrator
+            topologyKey: kubernetes.io/hostname
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app.kubernetes.io/component
+                  operator: In
+                  values:
+                  - orchestrator
+              topologyKey: topology.kubernetes.io/zone
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            preference:
+              matchExpressions:
+              - key: node.kubernetes.io/instance-type
+                operator: In
+                values:
+                - m5.large
+                - m5.xlarge
+                - c5.large
+                - c5.xlarge
+      # Topology spread constraints for better distribution
+      topologySpreadConstraints:
+      - maxSkew: 1
+        topologyKey: topology.kubernetes.io/zone
+        whenUnsatisfiable: DoNotSchedule
+        labelSelector:
+          matchLabels:
+            app.kubernetes.io/component: orchestrator
+      - maxSkew: 1
+        topologyKey: kubernetes.io/hostname
+        whenUnsatisfiable: ScheduleAnyway
+        labelSelector:
+          matchLabels:
+            app.kubernetes.io/component: orchestrator
+      # Tolerations for dedicated nodes
+      tolerations:
+      - key: "conductor.dedicated"
+        operator: "Equal"
+        value: "true"
+        effect: "NoSchedule"
+      initContainers:
+      - name: init-redis-check
+        image: redis:7-alpine
+        command:
+        - sh
+        - -c
+        - |
+          echo "Checking Redis connectivity..."
+          redis-cli -h claude-conductor-redis -p 6379 ping
+          echo "Redis is ready"
+        env:
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: claude-conductor-secrets
+              key: redis-password
+      - name: init-workspace
+        image: claudeconductor/claude-conductor:latest
+        command: ["/bin/bash", "/scripts/init.sh"]
+        volumeMounts:
+        - name: workspace
+          mountPath: /workspace
+        - name: logs
+          mountPath: /var/log/conductor
+        - name: config-data
+          mountPath: /home/claude/.conductor
+        - name: scripts
+          mountPath: /scripts
+        securityContext:
+          runAsUser: 1000
+          runAsGroup: 1000
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+      containers:
+      - name: orchestrator
+        image: claudeconductor/claude-conductor:latest
+        imagePullPolicy: Always
+        command: ["python", "-m", "conductor.redis_orchestrator"]
+        args:
+        - "--config"
+        - "/config/config.yaml"
+        - "--redis-enabled"
+        - "--leader-election"
+        - "--performance-monitoring"
+        ports:
+        - name: dashboard
+          containerPort: 8080
+          protocol: TCP
+        - name: api
+          containerPort: 8081
+          protocol: TCP
+        - name: metrics
+          containerPort: 9090
+          protocol: TCP
+        - name: admin
+          containerPort: 8082
+          protocol: TCP
+        env:
+        # Core configuration
+        - name: CONDUCTOR_MODE
+          value: "production"
+        - name: CONDUCTOR_LOG_LEVEL
+          value: "INFO"
+        - name: CONDUCTOR_CONFIG
+          value: "/config/config.yaml"
+        - name: CONDUCTOR_DASHBOARD_PORT
+          value: "8080"
+        - name: CONDUCTOR_API_PORT
+          value: "8081"
+        
+        # Redis configuration
+        - name: REDIS_ENABLED
+          value: "true"
+        - name: REDIS_HOST
+          value: "claude-conductor-redis"
+        - name: REDIS_PORT
+          value: "6379"
+        - name: REDIS_DB
+          value: "0"
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: claude-conductor-secrets
+              key: redis-password
+        
+        # High availability configuration
+        - name: LEADER_ELECTION_ENABLED
+          value: "true"
+        - name: LEADER_ELECTION_LEASE_DURATION
+          value: "30s"
+        - name: LEADER_ELECTION_RENEW_DEADLINE
+          value: "20s"
+        - name: LEADER_ELECTION_RETRY_PERIOD
+          value: "5s"
+        
+        # Instance identification
+        - name: INSTANCE_ID
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        
+        # Performance and monitoring
+        - name: METRICS_ENABLED
+          value: "true"
+        - name: PROMETHEUS_PORT
+          value: "9090"
+        - name: PERFORMANCE_MONITORING_ENABLED
+          value: "true"
+        - name: PERFORMANCE_COLLECTION_INTERVAL
+          value: "5"
+        
+        # Security configuration
+        - name: SECURITY_ENABLED
+          value: "true"
+        - name: JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: claude-conductor-secrets
+              key: jwt-secret
+        - name: API_KEY_ENCRYPTION_KEY
+          valueFrom:
+            secretKeyRef:
+              name: claude-conductor-secrets
+              key: api-key-encryption
+        
+        # Claude API configuration
+        - name: CLAUDE_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: claude-conductor-secrets
+              key: claude-api-key
+        
+        # Distributed tracing
+        - name: JAEGER_AGENT_HOST
+          value: "jaeger-agent"
+        - name: JAEGER_AGENT_PORT
+          value: "6831"
+        - name: OTEL_EXPORTER_JAEGER_ENDPOINT
+          value: "http://jaeger-collector:14268/api/traces"
+        
+        # Feature flags
+        - name: ENABLE_WEB_DASHBOARD
+          value: "true"
+        - name: ENABLE_MCP_INTEGRATION
+          value: "true"
+        - name: ENABLE_TOKEN_OPTIMIZATION
+          value: "true"
+        - name: ENABLE_LLM_EVALUATION
+          value: "true"
+        
+        resources:
+          requests:
+            cpu: "1000m"      # Production workload requirements
+            memory: "2Gi"     # Sufficient memory for Redis and performance monitoring
+            ephemeral-storage: "1Gi"
+          limits:
+            cpu: "4000m"      # Allow burst capacity
+            memory: "8Gi"     # Prevent OOMKilled events
+            ephemeral-storage: "2Gi"
+        
+        # Enhanced health checks with proper timeouts
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: dashboard
+            scheme: HTTP
+          initialDelaySeconds: 120    # Allow sufficient startup time
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+          successThreshold: 1
+        
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: dashboard
+            scheme: HTTP
+          initialDelaySeconds: 30
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+          successThreshold: 1
+        
+        startupProbe:
+          httpGet:
+            path: /startup
+            port: dashboard
+            scheme: HTTP
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 60       # Allow 300 seconds for startup
+          successThreshold: 1
+        
+        # Lifecycle hooks for graceful shutdown
+        lifecycle:
+          preStop:
+            exec:
+              command:
+              - /bin/bash
+              - -c
+              - |
+                echo "Graceful shutdown initiated..."
+                kill -TERM 1
+                sleep 30
+        
+        volumeMounts:
+        - name: config
+          mountPath: /config
+          readOnly: true
+        - name: logging-config
+          mountPath: /config/logging
+          readOnly: true
+        - name: workspace
+          mountPath: /workspace
+        - name: logs
+          mountPath: /var/log/conductor
+        - name: config-data
+          mountPath: /home/claude/.conductor
+        - name: scripts
+          mountPath: /scripts
+          readOnly: true
+        - name: tmp
+          mountPath: /tmp
+        - name: var-tmp
+          mountPath: /var/tmp
+        - name: secrets
+          mountPath: /etc/secrets
+          readOnly: true
+        
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          runAsUser: 1000
+          runAsGroup: 1000
+          seccompProfile:
+            type: RuntimeDefault
+          capabilities:
+            drop:
+            - ALL
+            add: []
+      
+      # Log aggregation sidecar
+      - name: fluent-bit
+        image: fluent/fluent-bit:2.2
+        env:
+        - name: FLUENT_CONF
+          value: fluent-bit.conf
+        - name: FLUENT_OPT
+          value: ""
+        volumeMounts:
+        - name: logs
+          mountPath: /var/log/conductor
+          readOnly: true
+        - name: fluent-bit-config
+          mountPath: /fluent-bit/etc
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+          limits:
+            cpu: "500m"
+            memory: "256Mi"
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          runAsUser: 1000
+          capabilities:
+            drop:
+            - ALL
+      
+      volumes:
+      - name: config
+        configMap:
+          name: claude-conductor-config
+          items:
+          - key: config.yaml
+            path: config.yaml
+      - name: logging-config
+        configMap:
+          name: claude-conductor-config
+          items:
+          - key: logging.yaml
+            path: logging.yaml
+      - name: scripts
+        configMap:
+          name: claude-conductor-scripts
+          defaultMode: 0755
+      - name: fluent-bit-config
+        configMap:
+          name: fluent-bit-config
+      - name: workspace
+        persistentVolumeClaim:
+          claimName: claude-conductor-workspace
+      - name: logs
+        persistentVolumeClaim:
+          claimName: claude-conductor-logs
+      - name: config-data
+        persistentVolumeClaim:
+          claimName: claude-conductor-config-data
+      - name: secrets
+        secret:
+          secretName: claude-conductor-secrets
+          defaultMode: 0400
+      - name: tmp
+        emptyDir:
+          sizeLimit: 500Mi
+          medium: Memory
+      - name: var-tmp
+        emptyDir:
+          sizeLimit: 200Mi
+          medium: Memory
+      
+      restartPolicy: Always
+      terminationGracePeriodSeconds: 60  # Increased for graceful shutdown
+      dnsPolicy: ClusterFirst
+      # Priority class for critical workloads
+      priorityClassName: claude-conductor-high-priority
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: claude-conductor-agents
+  namespace: claude-conductor
+  labels:
+    app.kubernetes.io/name: claude-conductor
+    app.kubernetes.io/component: agent
+    app.kubernetes.io/version: "2.0.0"
+    app.kubernetes.io/part-of: claude-conductor
+    app.kubernetes.io/managed-by: kubernetes
+spec:
+  replicas: 5  # Increased for production workload
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 2  # Allow faster scaling up
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: claude-conductor
+      app.kubernetes.io/component: agent
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: claude-conductor
+        app.kubernetes.io/component: agent
+        app.kubernetes.io/version: "2.0.0"
+        app.kubernetes.io/part-of: claude-conductor
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+        prometheus.io/path: "/metrics"
+        fluentd.io/include: "true"
+        sidecar.istio.io/inject: "true"
+        container.apparmor.security.beta.kubernetes.io/agent: runtime/default
+    spec:
+      serviceAccountName: claude-conductor-agent
+      automountServiceAccountToken: true
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      
+      # Agent distribution across nodes
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app.kubernetes.io/component
+                  operator: In
+                  values:
+                  - agent
+              topologyKey: kubernetes.io/hostname
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            preference:
+              matchExpressions:
+              - key: node.kubernetes.io/instance-type
+                operator: In
+                values:
+                - m5.large
+                - m5.xlarge
+                - c5.large
+                - c5.xlarge
+      
+      topologySpreadConstraints:
+      - maxSkew: 2
+        topologyKey: topology.kubernetes.io/zone
+        whenUnsatisfiable: ScheduleAnyway
+        labelSelector:
+          matchLabels:
+            app.kubernetes.io/component: agent
+      
+      tolerations:
+      - key: "conductor.dedicated"
+        operator: "Equal"
+        value: "true"
+        effect: "NoSchedule"
+      
+      initContainers:
+      - name: wait-for-orchestrator
+        image: curlimages/curl:latest
+        command:
+        - sh
+        - -c
+        - |
+          echo "Waiting for orchestrator to be ready..."
+          until curl -f http://claude-conductor:8080/ready; do
+            echo "Orchestrator not ready, waiting..."
+            sleep 5
+          done
+          echo "Orchestrator is ready"
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 65534
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+      
+      containers:
+      - name: agent
+        image: claudeconductor/claude-conductor:latest
+        imagePullPolicy: Always
+        command: ["python", "-m", "conductor.monitored_agent"]
+        args:
+        - "--orchestrator-host"
+        - "claude-conductor"
+        - "--orchestrator-port"
+        - "8081"
+        - "--performance-monitoring"
+        
+        ports:
+        - name: metrics
+          containerPort: 9090
+          protocol: TCP
+        - name: health
+          containerPort: 8080
+          protocol: TCP
+        
+        env:
+        # Core configuration
+        - name: CONDUCTOR_MODE
+          value: "production"
+        - name: CONDUCTOR_LOG_LEVEL
+          value: "INFO"
+        - name: AGENT_ID
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        
+        # Orchestrator connection
+        - name: ORCHESTRATOR_HOST
+          value: "claude-conductor"
+        - name: ORCHESTRATOR_PORT
+          value: "8081"
+        - name: ORCHESTRATOR_HTTPS
+          value: "false"
+        
+        # Instance identification
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        
+        # Performance monitoring
+        - name: PERFORMANCE_MONITORING_ENABLED
+          value: "true"
+        - name: METRICS_ENABLED
+          value: "true"
+        - name: PROMETHEUS_PORT
+          value: "9090"
+        
+        # Container runtime
+        - name: CONTAINER_RUNTIME
+          value: "kubernetes"
+        - name: AGENT_WORKSPACE_SIZE
+          value: "10Gi"
+        
+        # Security
+        - name: ENABLE_SECURITY_CONTEXT
+          value: "true"
+        
+        # Claude API
+        - name: CLAUDE_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: claude-conductor-secrets
+              key: claude-api-key
+        
+        # Resource configuration
+        - name: MAX_CONCURRENT_TASKS
+          value: "3"
+        - name: TASK_TIMEOUT
+          value: "600"
+        
+        resources:
+          requests:
+            cpu: "500m"       # Agents need more CPU for task execution
+            memory: "1Gi"     # Sufficient memory for task processing
+            ephemeral-storage: "2Gi"
+          limits:
+            cpu: "2000m"      # Allow burst for intensive tasks
+            memory: "4Gi"     # Prevent OOM during heavy tasks
+            ephemeral-storage: "10Gi"
+        
+        # Health checks for agents
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: health
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+          successThreshold: 1
+        
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: health
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+          successThreshold: 1
+        
+        startupProbe:
+          httpGet:
+            path: /startup
+            port: health
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 24       # Allow 120 seconds for startup
+          successThreshold: 1
+        
+        # Graceful shutdown
+        lifecycle:
+          preStop:
+            exec:
+              command:
+              - /bin/bash
+              - -c
+              - |
+                echo "Agent graceful shutdown initiated..."
+                # Complete current tasks before shutdown
+                kill -TERM 1
+                sleep 45
+        
+        volumeMounts:
+        - name: workspace
+          mountPath: /workspace
+        - name: logs
+          mountPath: /var/log/conductor
+        - name: agent-workspace
+          mountPath: /agent-workspace
+        - name: tmp
+          mountPath: /tmp
+        - name: var-tmp
+          mountPath: /var/tmp
+        
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: false  # Agents need write access for task execution
+          runAsNonRoot: true
+          runAsUser: 1000
+          runAsGroup: 1000
+          seccompProfile:
+            type: RuntimeDefault
+          capabilities:
+            drop:
+            - ALL
+            add: []
+      
+      volumes:
+      - name: workspace
+        persistentVolumeClaim:
+          claimName: claude-conductor-workspace
+      - name: logs
+        persistentVolumeClaim:
+          claimName: claude-conductor-logs
+      - name: agent-workspace
+        emptyDir:
+          sizeLimit: 10Gi
+      - name: tmp
+        emptyDir:
+          sizeLimit: 1Gi
+          medium: Memory
+      - name: var-tmp
+        emptyDir:
+          sizeLimit: 500Mi
+          medium: Memory
+      
+      restartPolicy: Always
+      terminationGracePeriodSeconds: 60
+      dnsPolicy: ClusterFirst
+      priorityClassName: claude-conductor-medium-priority

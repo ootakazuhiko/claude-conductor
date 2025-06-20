@@ -1,0 +1,46 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: claude-conductor-orchestrator-pdb
+  namespace: claude-conductor
+  labels:
+    app.kubernetes.io/name: claude-conductor
+    app.kubernetes.io/component: orchestrator
+spec:
+  minAvailable: 2  # Ensure at least 2 orchestrator instances are available
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: claude-conductor
+      app.kubernetes.io/component: orchestrator
+
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: claude-conductor-agents-pdb
+  namespace: claude-conductor
+  labels:
+    app.kubernetes.io/name: claude-conductor
+    app.kubernetes.io/component: agent
+spec:
+  minAvailable: 3  # Ensure at least 3 agents are available
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: claude-conductor
+      app.kubernetes.io/component: agent
+
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: claude-conductor-redis-pdb
+  namespace: claude-conductor
+  labels:
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/component: database
+spec:
+  minAvailable: 1  # Redis should always have at least 1 instance
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: redis
+      app.kubernetes.io/component: database
