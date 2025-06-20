@@ -6,6 +6,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Claude Conductor is a multi-agent orchestration system for Claude Code instances. It enables parallel execution and coordinated task distribution across multiple containerized agents.
 
+## Dependencies and Environment
+
+This project uses `uv` for Python package management. Python 3.9+ is required. Main dependencies include:
+- pyyaml (configuration)
+- psutil (system monitoring)
+- pytest (testing framework)
+- redis (optional, for persistence)
+- fastapi & uvicorn (optional, for web dashboard)
+
 ## Development Commands
 
 ### Setup and Installation
@@ -36,11 +45,20 @@ Claude Conductor is a multi-agent orchestration system for Claude Code instances
 # Run in watch mode
 ./scripts/test.sh --watch
 
-# Run linting only
+# Run linting and type checking
 ./scripts/test.sh lint
 
-# Run security checks
+# Run security checks  
 ./scripts/test.sh security
+
+# Run a single test file
+pytest tests/unit/test_orchestrator.py
+
+# Run tests matching a pattern
+pytest -k "test_agent" 
+
+# Run tests with verbose output
+pytest -v
 ```
 
 ### Development and Deployment
@@ -177,6 +195,9 @@ parallel_task = create_task(
 - Minimum 80% test coverage
 - Type hints required for public APIs
 - Docstrings for all public functions and classes
+- Black formatting with 100 character line length
+- Ruff linting with E, W, F, I, C, B, UP rules
+- Mypy strict type checking enabled
 
 ### Testing Strategy
 - **Unit Tests**: Test individual components in isolation
@@ -287,3 +308,10 @@ Priority areas for enhancement:
 3. Kubernetes native deployment
 4. Real Claude Code CLI integration
 5. Advanced scheduling and resource management
+
+## Important Notes
+
+- The system requires either Docker or Podman to be installed and running
+- Claude Code CLI must be accessible in the system PATH
+- Unix socket communication requires appropriate file system permissions
+- Container resource limits should be adjusted based on available system resources
