@@ -17,6 +17,7 @@ from enum import Enum
 import logging
 import asyncio
 from functools import wraps
+import bcrypt
 
 logger = logging.getLogger(__name__)
 
@@ -217,22 +218,18 @@ def get_user_permissions(roles: Set[UserRole]) -> Set[Permission]:
     return permissions
 
 class PasswordHasher:
-    """パスワードハッシュ化（簡易版）"""
+    """パスワードハッシュ化"""
     
     @staticmethod
     def hash_password(password: str) -> str:
         """パスワードをハッシュ化"""
-        salt = secrets.token_hex(16)
-        return salt + ":" + hashlib.sha256((salt + password).encode()).hexdigest()
+        salt = bcrypt.gensalt()
+        return bcrypt.hashpw(password.encode('utf-8'), salt).decode('utf-8')
     
     @staticmethod
     def verify_password(password: str, hashed: str) -> bool:
         """パスワードを検証"""
-        try:
-            salt, hash_value = hashed.split(":", 1)
-            return hash_value == hashlib.sha256((salt + password).encode()).hexdigest()
-        except ValueError:
-            return False
+        return bcrypt.checkpw(password.encode('utf-8'), hashed.encode('utf-8'))
 
 class TokenManager:
     """JWTトークン管理"""
