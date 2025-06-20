@@ -19,6 +19,8 @@ from .protocol import Agent2AgentProtocol, UnixSocketChannel, AgentMessage, Mess
 from .workspace_isolation import WorkspaceIsolationManager, WorkspaceContainer
 from .thinking_mode import ThinkingModeManager, ThoughtType
 from .checkpoint import CheckpointManager, RecoveryOptions
+from .token_optimizer import TokenOptimizer, TokenUsage, ModelType
+from .mcp_integration import MCPClient, MCPToolAdapter
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -348,6 +350,9 @@ class ClaudeAgent:
             storage_path=f"/tmp/claude_checkpoints_{agent_id}",
             storage_backend="filesystem"
         )
+        self.token_optimizer = TokenOptimizer()
+        self.mcp_client = MCPClient()
+        self.mcp_adapter = MCPToolAdapter(self.mcp_client)
         
     def start(self):
         """Start agent"""
@@ -463,6 +468,9 @@ class ClaudeAgent:
                 result = self._execute_generic_task(task)
                 
             execution_time = time.time() - start_time
+            
+            # Record token usage (simulated)
+            self._record_token_usage(task, execution_time)
             
             return TaskResult(
                 task_id=task.task_id,
@@ -775,6 +783,46 @@ class ClaudeAgent:
             },
             execution_time=time.time() - recovery_data.get("restored_at", time.time())
         )
+    
+    def _record_token_usage(self, task: Task, execution_time: float):
+        """Record token usage for the task"""
+        # Simulate token usage based on task complexity
+        # In real implementation, this would come from actual LLM API response
+        base_tokens = 1000
+        
+        if task.files:
+            base_tokens += len(task.files) * 500
+            
+        if task.task_type == "code_review":
+            multiplier = 2.0
+        elif task.task_type == "refactor":
+            multiplier = 3.0
+        elif task.task_type == "test_generation":
+            multiplier = 2.5
+        else:
+            multiplier = 1.5
+            
+        input_tokens = int(base_tokens * multiplier)
+        output_tokens = int(input_tokens * 0.8)  # Output is typically 80% of input
+        
+        # Determine model based on task complexity
+        if input_tokens > 5000:
+            model = ModelType.CLAUDE_3_OPUS
+        elif input_tokens > 2000:
+            model = ModelType.CLAUDE_3_SONNET
+        else:
+            model = ModelType.CLAUDE_3_HAIKU
+            
+        usage = TokenUsage(
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            total_tokens=input_tokens + output_tokens,
+            model=model,
+            task_id=task.task_id,
+            agent_id=self.agent_id
+        )
+        
+        self.token_optimizer.record_usage(usage, task_type=task.task_type)
     
     async def _setup_isolated_workspace(self):
         """Set up isolated workspace"""
