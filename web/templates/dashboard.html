@@ -31,6 +31,14 @@
             margin-bottom: 20px; 
         }
         
+        .three-column { 
+            grid-template-columns: 1fr 1fr 1fr; 
+        }
+        
+        .full-width { 
+            grid-column: 1 / -1; 
+        }
+        
         .card { 
             background: rgba(255,255,255,0.95); 
             padding: 25px; 
@@ -49,7 +57,7 @@
         
         .stats-grid { 
             display: grid; 
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); 
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); 
             gap: 15px; 
         }
         
@@ -188,6 +196,76 @@
             z-index: 1000;
         }
         
+        .auth-status {
+            position: fixed;
+            top: 20px;
+            right: 200px;
+            padding: 8px 12px;
+            border-radius: 15px;
+            font-size: 11px;
+            font-weight: bold;
+            z-index: 1000;
+            background: #fff3cd;
+            color: #856404;
+        }
+        
+        .auth-status.authenticated {
+            background: #d1ecf1;
+            color: #0c5460;
+        }
+        
+        .tab-container {
+            margin-top: 20px;
+        }
+        
+        .tab-buttons {
+            display: flex;
+            border-bottom: 2px solid #dee2e6;
+            margin-bottom: 20px;
+        }
+        
+        .tab-button {
+            padding: 10px 20px;
+            background: none;
+            border: none;
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            transition: all 0.3s ease;
+        }
+        
+        .tab-button.active {
+            border-bottom-color: #3498db;
+            color: #3498db;
+            font-weight: bold;
+        }
+        
+        .tab-content {
+            display: none;
+        }
+        
+        .tab-content.active {
+            display: block;
+        }
+        
+        .metric-card {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 10px 0;
+            border-left: 4px solid #3498db;
+        }
+        
+        .metric-title {
+            font-weight: bold;
+            color: #2c3e50;
+            margin-bottom: 5px;
+        }
+        
+        .metric-value {
+            font-size: 1.2em;
+            color: #27ae60;
+        }
+        
         .connected { background: #d4edda; color: #155724; }
         .disconnected { background: #f8d7da; color: #721c24; }
         
@@ -211,6 +289,10 @@
 <body>
     <div class="connection-status disconnected" id="connection-status">
         🔴 Disconnected
+    </div>
+    
+    <div class="auth-status" id="auth-status">
+        👤 Not authenticated
     </div>
 
     <div class="container">
@@ -239,6 +321,14 @@
                         <div class="stat-value" id="active-agents">0</div>
                         <div class="stat-label">Active Agents</div>
                     </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="token-usage">0</div>
+                        <div class="stat-label">Tokens Used</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="cost-today">$0.00</div>
+                        <div class="stat-label">Cost Today</div>
+                    </div>
                 </div>
                 <div class="chart-container">
                     📈 Task execution timeline (coming soon)
@@ -256,38 +346,113 @@
             </div>
         </div>
 
-        <div class="dashboard-grid">
-            <div class="card">
-                <h2>➕ Submit Task</h2>
-                <div class="task-form">
-                    <div class="form-group">
-                        <label for="task-type">Task Type:</label>
-                        <select id="task-type" class="form-control">
-                            <option value="generic">Generic Task</option>
-                            <option value="code_review">Code Review</option>
-                            <option value="refactor">Code Refactoring</option>
-                            <option value="test_generation">Test Generation</option>
-                            <option value="analysis">Code Analysis</option>
-                        </select>
+        <!-- Enhanced Features Tabs -->
+        <div class="card full-width">
+            <h2>🔧 Advanced Features</h2>
+            <div class="tab-container">
+                <div class="tab-buttons">
+                    <button class="tab-button active" onclick="showTab('tasks')">📋 Task Management</button>
+                    <button class="tab-button" onclick="showTab('security')">🔒 Security</button>
+                    <button class="tab-button" onclick="showTab('evaluation')">📊 Evaluation</button>
+                    <button class="tab-button" onclick="showTab('tokens')">💰 Token Usage</button>
+                    <button class="tab-button" onclick="showTab('mcp')">🔌 MCP Integration</button>
+                </div>
+                
+                <div id="tasks-tab" class="tab-content active">
+                    <h3>➕ Submit Task</h3>
+                    <div class="task-form">
+                        <div class="form-group">
+                            <label for="task-type">Task Type:</label>
+                            <select id="task-type" class="form-control">
+                                <option value="generic">Generic Task</option>
+                                <option value="code_review">Code Review</option>
+                                <option value="refactor">Code Refactoring</option>
+                                <option value="test_generation">Test Generation</option>
+                                <option value="analysis">Code Analysis</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="task-description">Description:</label>
+                            <textarea id="task-description" class="form-control" rows="3" 
+                                      placeholder="Describe what you want to accomplish..."></textarea>
+                        </div>
+                        <div class="form-group">
+                            <label for="task-files">Files (optional):</label>
+                            <input type="text" id="task-files" class="form-control" 
+                                   placeholder="file1.py, file2.py, ...">
+                        </div>
+                        <div class="form-group">
+                            <label for="task-priority">Priority (1-10):</label>
+                            <input type="range" id="task-priority" min="1" max="10" value="5" class="form-control">
+                            <span id="priority-value">5</span>
+                        </div>
+                        <button class="btn" onclick="submitTask()">🚀 Submit Task</button>
+                    </div>
+                </div>
+                
+                <div id="security-tab" class="tab-content">
+                    <h3>🔒 Security Management</h3>
+                    <div class="metric-card">
+                        <div class="metric-title">Authentication Status</div>
+                        <div class="metric-value" id="auth-status-detail">Not authenticated</div>
                     </div>
                     <div class="form-group">
-                        <label for="task-description">Description:</label>
-                        <textarea id="task-description" class="form-control" rows="3" 
-                                  placeholder="Describe what you want to accomplish..."></textarea>
+                        <label for="username">Username:</label>
+                        <input type="text" id="username" class="form-control" placeholder="Enter username">
                     </div>
                     <div class="form-group">
-                        <label for="task-files">Files (optional):</label>
-                        <input type="text" id="task-files" class="form-control" 
-                               placeholder="file1.py, file2.py, ...">
+                        <label for="password">Password:</label>
+                        <input type="password" id="password" class="form-control" placeholder="Enter password">
                     </div>
-                    <div class="form-group">
-                        <label for="task-priority">Priority (1-10):</label>
-                        <input type="range" id="task-priority" min="1" max="10" value="5" class="form-control">
-                        <span id="priority-value">5</span>
+                    <button class="btn" onclick="authenticate()">🔐 Login</button>
+                    <button class="btn btn-warning" onclick="logout()" style="margin-left: 10px;">🚪 Logout</button>
+                    
+                    <div id="security-stats" style="margin-top: 20px;"></div>
+                </div>
+                
+                <div id="evaluation-tab" class="tab-content">
+                    <h3>📊 Task Evaluation</h3>
+                    <div class="metric-card">
+                        <div class="metric-title">Recent Evaluations</div>
+                        <div id="evaluation-summary">Loading...</div>
                     </div>
-                    <button class="btn" onclick="submitTask()">🚀 Submit Task</button>
+                    <div id="evaluation-reports"></div>
+                </div>
+                
+                <div id="tokens-tab" class="tab-content">
+                    <h3>💰 Token Usage & Cost Analysis</h3>
+                    <div class="stats-grid">
+                        <div class="metric-card">
+                            <div class="metric-title">Input Tokens</div>
+                            <div class="metric-value" id="input-tokens">0</div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="metric-title">Output Tokens</div>
+                            <div class="metric-value" id="output-tokens">0</div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="metric-title">Total Cost</div>
+                            <div class="metric-value" id="total-cost">$0.00</div>
+                        </div>
+                    </div>
+                    <div id="cost-breakdown"></div>
+                </div>
+                
+                <div id="mcp-tab" class="tab-content">
+                    <h3>🔌 MCP Integration Status</h3>
+                    <div class="metric-card">
+                        <div class="metric-title">Connected Servers</div>
+                        <div class="metric-value" id="mcp-servers">0</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-title">Available Tools</div>
+                        <div class="metric-value" id="mcp-tools">0</div>
+                    </div>
                 </div>
             </div>
+        </div>
+        
+        <div class="dashboard-grid">
 
             <div class="card">
                 <h2>📝 Activity Log</h2>
@@ -296,6 +461,7 @@
                 </div>
                 <div style="margin-top: 15px;">
                     <button class="btn btn-warning" onclick="clearLog()">🗑️ Clear Log</button>
+                    <button class="btn btn-success" onclick="exportLog()" style="margin-left: 10px;">💾 Export Log</button>
                 </div>
             </div>
         </div>
@@ -304,6 +470,8 @@
     <script>
         let ws = null;
         let reconnectInterval = null;
+        let authToken = null;
+        let currentUser = null;
 
         // Update priority display
         document.getElementById('task-priority').addEventListener('input', function(e) {
@@ -379,6 +547,27 @@
             // Count active agents
             const activeCount = Object.values(stats.agents || {}).filter(agent => agent.running).length;
             document.getElementById('active-agents').textContent = activeCount;
+            
+            // Update token usage
+            if (stats.token_usage) {
+                document.getElementById('token-usage').textContent = stats.token_usage.total_tokens || 0;
+                document.getElementById('input-tokens').textContent = stats.token_usage.input_tokens || 0;
+                document.getElementById('output-tokens').textContent = stats.token_usage.output_tokens || 0;
+                document.getElementById('total-cost').textContent = `$${(stats.token_usage.total_cost || 0).toFixed(4)}`;
+                document.getElementById('cost-today').textContent = `$${(stats.token_usage.cost_today || 0).toFixed(2)}`;
+            }
+            
+            // Update MCP stats
+            if (stats.mcp) {
+                document.getElementById('mcp-servers').textContent = stats.mcp.servers_connected || 0;
+                document.getElementById('mcp-tools').textContent = stats.mcp.tools_available || 0;
+            }
+            
+            // Update user info
+            if (stats.user) {
+                currentUser = stats.user;
+                updateAuthStatus(true);
+            }
         }
 
         function updateAgents(agents) {
@@ -445,6 +634,131 @@
             document.getElementById('activity-log').textContent = '';
             logActivity('Activity log cleared');
         }
+        
+        function exportLog() {
+            const log = document.getElementById('activity-log').textContent;
+            const blob = new Blob([log], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `claude-conductor-log-${new Date().toISOString().split('T')[0]}.txt`;
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+        
+        function showTab(tabName) {
+            // Hide all tabs
+            document.querySelectorAll('.tab-content').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            document.querySelectorAll('.tab-button').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            
+            // Show selected tab
+            document.getElementById(tabName + '-tab').classList.add('active');
+            event.target.classList.add('active');
+        }
+        
+        function updateAuthStatus(authenticated) {
+            const authStatus = document.getElementById('auth-status');
+            const authDetail = document.getElementById('auth-status-detail');
+            
+            if (authenticated && currentUser) {
+                authStatus.textContent = `👤 ${currentUser.username}`;
+                authStatus.className = 'auth-status authenticated';
+                authDetail.textContent = `Logged in as ${currentUser.username} (${currentUser.roles.join(', ')})`;
+            } else {
+                authStatus.textContent = '👤 Not authenticated';
+                authStatus.className = 'auth-status';
+                authDetail.textContent = 'Not authenticated';
+            }
+        }
+        
+        async function authenticate() {
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+            
+            if (!username || !password) {
+                alert('Please enter username and password');
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/auth/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, password })
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok) {
+                    authToken = result.access_token;
+                    logActivity(`Authentication successful for user: ${username}`);
+                    document.getElementById('password').value = '';
+                    
+                    // Load security stats
+                    loadSecurityStats();
+                } else {
+                    logActivity(`Authentication failed: ${result.detail}`);
+                    alert(`Authentication failed: ${result.detail}`);
+                }
+            } catch (error) {
+                logActivity(`Authentication error: ${error.message}`);
+                alert(`Authentication error: ${error.message}`);
+            }
+        }
+        
+        function logout() {
+            authToken = null;
+            currentUser = null;
+            updateAuthStatus(false);
+            document.getElementById('username').value = '';
+            document.getElementById('password').value = '';
+            document.getElementById('security-stats').innerHTML = '';
+            logActivity('Logged out');
+        }
+        
+        async function loadSecurityStats() {
+            if (!authToken) return;
+            
+            try {
+                const response = await fetch('/api/security/stats', {
+                    headers: { 'Authorization': `Bearer ${authToken}` }
+                });
+                
+                if (response.ok) {
+                    const stats = await response.json();
+                    displaySecurityStats(stats);
+                } else {
+                    console.log('Could not load security stats (may require admin privileges)');
+                }
+            } catch (error) {
+                console.error('Error loading security stats:', error);
+            }
+        }
+        
+        function displaySecurityStats(stats) {
+            const container = document.getElementById('security-stats');
+            container.innerHTML = `
+                <h4>Security Statistics</h4>
+                <div class="stats-grid">
+                    <div class="metric-card">
+                        <div class="metric-title">Total Users</div>
+                        <div class="metric-value">${stats.security_manager_stats?.total_users || 0}</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-title">Active API Keys</div>
+                        <div class="metric-value">${stats.security_manager_stats?.active_api_keys || 0}</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-title">Failed Auth (24h)</div>
+                        <div class="metric-value">${stats.security_manager_stats?.failed_authentications_24h || 0}</div>
+                    </div>
+                </div>
+            `;
+        }
 
         async function submitTask() {
             const taskType = document.getElementById('task-type').value;
@@ -463,13 +777,19 @@
                 task_type: taskType,
                 description: description,
                 files: files,
-                priority: priority
+                priority: priority,
+                auth_token: authToken
             };
+            
+            const headers = { 'Content-Type': 'application/json' };
+            if (authToken) {
+                headers['Authorization'] = `Bearer ${authToken}`;
+            }
 
             try {
                 const response = await fetch('/api/task', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: headers,
                     body: JSON.stringify(taskData)
                 });
 

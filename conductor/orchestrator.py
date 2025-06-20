@@ -23,6 +23,7 @@ from .exceptions import (
     TaskExecutionError, TaskValidationError, TaskTimeoutError, ResourceError
 )
 from .error_handler import ErrorHandler, retry, CircuitBreaker
+from .security import SecurityManager, SecurityConfig, Permission, UserRole
 from .enhanced_error_handling import EnhancedErrorHandler, enhanced_retry, AdvancedCircuitBreaker
 from .evaluator import LLMJudgeEvaluator, EvaluationResult
 from .task_decomposer import TaskDecomposer, ComplexityAnalysis
@@ -71,6 +72,17 @@ class Orchestrator:
             expected_exception=AgentStartupError,
             health_check_interval=10.0
         )
+        
+        # Security manager (optional, disabled by default)
+        self.security_manager = None
+        if self.config.get("security_enabled", False):
+            security_config = SecurityConfig(
+                jwt_secret=self.config.get("security", {}).get("jwt_secret", "default-secret"),
+                jwt_expiration_hours=self.config.get("security", {}).get("jwt_expiration_hours", 24),
+                audit_log_enabled=self.config.get("security", {}).get("audit_enabled", True)
+            )
+            self.security_manager = SecurityManager(security_config)
+            logger.info("Security manager initialized")
         
         # Set up health check for agent circuit breaker
         self.agent_circuit_breaker.set_health_check(self._check_agent_health)
@@ -432,11 +444,27 @@ class Orchestrator:
             "total_agents": len(self.agents)
         }
         
+        # Add security statistics if security is enabled
+        if self.security_manager:
+            stats["security"] = self.security_manager.get_security_stats()
+        
         # Add evaluation statistics if available
         if hasattr(self, 'evaluator'):
             stats["evaluation"] = self.evaluator.get_statistics()
         
         return stats
+    
+    def get_security_status(self) -> Dict[str, Any]:
+        """セキュリティ状態を取得"""
+        if not self.security_manager:
+            return {"security_enabled": False}
+        
+        return {
+            "security_enabled": True,
+            "security_stats": self.security_manager.get_security_stats(),
+            "audit_enabled": self.security_manager.config.audit_log_enabled,
+            "recent_audit_events": len(self.security_manager.audit_logger.audit_log)
+        }
     
     def _run_evaluation(self, task: Task, result: TaskResult):
         """Run evaluation in background thread"""
