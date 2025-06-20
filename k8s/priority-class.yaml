@@ -1,0 +1,34 @@
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: claude-conductor-high-priority
+  labels:
+    app.kubernetes.io/name: claude-conductor
+    app.kubernetes.io/component: priority-class
+value: 1000
+globalDefault: false
+description: "High priority class for Claude Conductor orchestrator pods"
+
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: claude-conductor-medium-priority
+  labels:
+    app.kubernetes.io/name: claude-conductor
+    app.kubernetes.io/component: priority-class
+value: 500
+globalDefault: false
+description: "Medium priority class for Claude Conductor agent pods"
+
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: claude-conductor-low-priority
+  labels:
+    app.kubernetes.io/name: claude-conductor
+    app.kubernetes.io/component: priority-class
+value: 100
+globalDefault: false
+description: "Low priority class for Claude Conductor support pods"

@@ -1,0 +1,211 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: claude-conductor
+  labels:
+    app.kubernetes.io/name: claude-conductor
+    app.kubernetes.io/managed-by: kubernetes
+    # Pod Security Standards enforcement
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+    # Network policies enabled
+    name: claude-conductor
+    # Istio injection enabled for service mesh
+    istio-injection: enabled
+  annotations:
+    # Enforce restricted Pod Security Standards
+    security.alpha.kubernetes.io/sysctls: "*"
+    security.alpha.kubernetes.io/unsafe-sysctls: ""
+
+---
+# OPA Gatekeeper ConstraintTemplate for additional security policies
+apiVersion: templates.gatekeeper.sh/v1beta1
+kind: ConstraintTemplate
+metadata:
+  name: claudeconductorsecuritypolicy
+  namespace: claude-conductor
+spec:
+  crd:
+    spec:
+      names:
+        kind: ClaudeConductorSecurityPolicy
+      validation:
+        openAPIV3Schema:
+          type: object
+          properties:
+            allowedImages:
+              type: array
+              items:
+                type: string
+            requiredLabels:
+              type: array
+              items:
+                type: string
+            maxReplicas:
+              type: integer
+            requiredSecurityContext:
+              type: object
+  targets:
+    - target: admission.k8s.gatekeeper.sh
+      rego: |
+        package claudeconductorsecuritypolicy
+        
+        violation[{"msg": msg}] {
+          # Check for required security labels
+          required_labels := input.parameters.requiredLabels
+          missing_labels := [label | label := required_labels[_]; not input.review.object.metadata.labels[label]]
+          count(missing_labels) > 0
+          msg := sprintf("Missing required security labels: %v", [missing_labels])
+        }
+        
+        violation[{"msg": msg}] {
+          # Check image allowlist
+          allowed_images := input.parameters.allowedImages
+          container := input.review.object.spec.containers[_]
+          not startswith(container.image, allowed_images[_])
+          msg := sprintf("Container image %v is not in allowlist: %v", [container.image, allowed_images])
+        }
+        
+        violation[{"msg": msg}] {
+          # Check replica limits
+          max_replicas := input.parameters.maxReplicas
+          input.review.object.spec.replicas > max_replicas
+          msg := sprintf("Replicas %v exceeds maximum allowed: %v", [input.review.object.spec.replicas, max_replicas])
+        }
+        
+        violation[{"msg": msg}] {
+          # Ensure security context is properly configured
+          container := input.review.object.spec.containers[_]
+          not container.securityContext.runAsNonRoot
+          msg := sprintf("Container %v must run as non-root", [container.name])
+        }
+        
+        violation[{"msg": msg}] {
+          # Ensure readOnlyRootFilesystem where required
+          container := input.review.object.spec.containers[_]
+          container.name == "orchestrator"
+          not container.securityContext.readOnlyRootFilesystem
+          msg := sprintf("Orchestrator container must have readOnlyRootFilesystem: true")
+        }
+
+---
+# OPA Gatekeeper Constraint for Claude Conductor security policy
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: ClaudeConductorSecurityPolicy
+metadata:
+  name: claude-conductor-security-policy
+  namespace: claude-conductor
+spec:
+  match:
+    kinds:
+      - apiGroups: ["apps"]
+        kinds: ["Deployment"]
+    namespaces: ["claude-conductor"]
+    labelSelector:
+      matchLabels:
+        app.kubernetes.io/name: claude-conductor
+  parameters:
+    allowedImages:
+      - "claudeconductor/claude-conductor"
+      - "redis:7"
+      - "fluent/fluent-bit"
+      - "curlimages/curl"
+    requiredLabels:
+      - "app.kubernetes.io/name"
+      - "app.kubernetes.io/component"
+      - "app.kubernetes.io/version"
+    maxReplicas: 10
+    requiredSecurityContext:
+      runAsNonRoot: true
+      readOnlyRootFilesystem: true
+
+---
+# Resource Quota for the namespace
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: claude-conductor-resource-quota
+  namespace: claude-conductor
+  labels:
+    app.kubernetes.io/name: claude-conductor
+    app.kubernetes.io/component: resource-quota
+spec:
+  hard:
+    # Pod limits
+    pods: "50"
+    
+    # Compute resource limits
+    requests.cpu: "20"
+    requests.memory: "40Gi"
+    limits.cpu: "50"
+    limits.memory: "100Gi"
+    
+    # Storage limits
+    requests.storage: "500Gi"
+    persistentvolumeclaims: "20"
+    
+    # Service limits
+    services: "10"
+    services.loadbalancers: "5"
+    services.nodeports: "2"
+    
+    # Secret and ConfigMap limits
+    secrets: "20"
+    configmaps: "20"
+    
+    # Other resource limits
+    count/deployments.apps: "10"
+    count/replicasets.apps: "20"
+    count/statefulsets.apps: "5"
+    count/jobs.batch: "20"
+    count/cronjobs.batch: "10"
+
+---
+# Limit Range for default resource constraints
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: claude-conductor-limit-range
+  namespace: claude-conductor
+  labels:
+    app.kubernetes.io/name: claude-conductor
+    app.kubernetes.io/component: limit-range
+spec:
+  limits:
+  # Default limits for containers
+  - default:
+      cpu: "1000m"
+      memory: "2Gi"
+      ephemeral-storage: "2Gi"
+    defaultRequest:
+      cpu: "100m"
+      memory: "256Mi"
+      ephemeral-storage: "500Mi"
+    max:
+      cpu: "8000m"
+      memory: "16Gi"
+      ephemeral-storage: "20Gi"
+    min:
+      cpu: "50m"
+      memory: "128Mi"
+      ephemeral-storage: "100Mi"
+    type: Container
+  
+  # Limits for pods
+  - max:
+      cpu: "10000m"
+      memory: "20Gi"
+      ephemeral-storage: "30Gi"
+    min:
+      cpu: "100m"
+      memory: "256Mi"
+      ephemeral-storage: "500Mi"
+    type: Pod
+  
+  # Limits for PVCs
+  - max:
+      storage: "100Gi"
+    min:
+      storage: "1Gi"
+    type: PersistentVolumeClaim
