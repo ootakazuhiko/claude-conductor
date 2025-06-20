@@ -8,13 +8,14 @@ import time
 import json
 import sqlite3
 from dataclasses import dataclass, field, asdict
-from typing import Dict, List, Optional, Any, Union, Tuple
+from typing import Dict, List, Optional, Any, Union, Tuple, Callable
 from enum import Enum
 from datetime import datetime, timedelta
 import logging
 import asyncio
 from collections import defaultdict
 import re
+import statistics
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +29,11 @@ class EvaluationCriteria(Enum):
     SECURITY = "security"
     MAINTAINABILITY = "maintainability"
     PERFORMANCE = "performance"
+    ACCURACY = "accuracy"
+    CONSISTENCY = "consistency"
+    CREATIVITY = "creativity"
+    RELEVANCE = "relevance"
+    SAFETY = "safety"
 
 @dataclass
 class CriteriaDefinition:
