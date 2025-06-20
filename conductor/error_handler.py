@@ -1,14 +1,23 @@
 #!/usr/bin/env python3
 """
-Error handling utilities and patterns for Claude Conductor
+Enhanced Error handling utilities and patterns for Claude Conductor
+エラーハンドリングとリトライメカニズムの強化版
 """
 
 import asyncio
 import functools
 import logging
 import time
-from typing import Any, Callable, Optional, Dict, Type, List
-from dataclasses import dataclass
+import json
+import pickle
+import sqlite3
+from typing import Any, Callable, Optional, Dict, Type, List, Union
+from dataclasses import dataclass, field, asdict
+from enum import Enum
+from datetime import datetime, timedelta
+import threading
+from collections import defaultdict, deque
+import uuid
 
 from .exceptions import (
     ConductorError, AgentError, ContainerError, TaskExecutionError,
@@ -18,7 +27,81 @@ from .exceptions import (
 
 logger = logging.getLogger(__name__)
 
+class ErrorSeverity(Enum):
+    """エラー重要度レベル"""
+    CRITICAL = "critical"
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
+    INFO = "info"
 
+class RecoveryStrategy(Enum):
+    """復旧戦略"""
+    IMMEDIATE_RETRY = "immediate_retry"
+    EXPONENTIAL_BACKOFF = "exponential_backoff"
+    CIRCUIT_BREAKER = "circuit_breaker"
+    FALLBACK = "fallback"
+    ESCALATION = "escalation"
+    MANUAL_INTERVENTION = "manual_intervention"
+
+@dataclass
+class ErrorPattern:
+    """エラーパターン定義"""
+    pattern_id: str
+    error_types: List[Type[Exception]]
+    conditions: Dict[str, Any]
+    severity: ErrorSeverity
+    recovery_strategy: RecoveryStrategy
+    max_retries: int = 3
+    escalation_threshold: int = 5
+    cooldown_period: float = 300.0  # 5 minutes
+    
+@dataclass
+class ErrorStatistics:
+    """エラー統計情報"""
+    error_type: str
+    total_count: int = 0
+    recent_count: int = 0  # 直近1時間
+    first_seen: float = field(default_factory=time.time)
+    last_seen: float = field(default_factory=time.time)
+    resolution_rate: float = 0.0
+    average_resolution_time: float = 0.0
+    impact_score: float = 0.0
+    
+@dataclass
+class ErrorIncident:
+    """エラーインシデント"""
+    incident_id: str
+    error_type: str
+    severity: ErrorSeverity
+    affected_components: List[str]
+    start_time: float
+    end_time: Optional[float] = None
+    recovery_actions: List[str] = field(default_factory=list)
+    resolution_summary: Optional[str] = None
+    lessons_learned: List[str] = field(default_factory=list)
+    
+    @property
+    def duration(self) -> float:
+        """インシデント継続時間"""
+        end = self.end_time or time.time()
+        return end - self.start_time
+    
+    @property
+    def is_resolved(self) -> bool:
+        """解決済みかどうか"""
+        return self.end_time is not None
+
+@dataclass
+class ErrorRecoveryPlan:
+    """エラー復旧計画"""
+    plan_id: str
+    error_pattern: str
+    steps: List[Dict[str, Any]]
+    success_criteria: List[str]
+    fallback_plan: Optional[str] = None
+    estimated_time: float = 0.0
+    
 @dataclass
 class RetryConfig:
     """Configuration for retry behavior"""
