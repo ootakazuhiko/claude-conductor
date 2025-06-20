@@ -22,6 +22,7 @@ from .exceptions import (
     TaskExecutionError, TaskValidationError, TaskTimeoutError, ResourceError
 )
 from .error_handler import ErrorHandler, retry, CircuitBreaker
+from .enhanced_error_handling import EnhancedErrorHandler, enhanced_retry, AdvancedCircuitBreaker
 
 logging.basicConfig(
     level=logging.INFO,
@@ -33,8 +34,8 @@ class Orchestrator:
     """Multi-agent orchestrator for Claude Conductor"""
     
     def __init__(self, config_path: Optional[str] = None):
-        # Initialize error handler
-        self.error_handler = ErrorHandler("orchestrator")
+        # Initialize enhanced error handler
+        self.error_handler = EnhancedErrorHandler("orchestrator")
         
         # Load configuration
         self.config = self._load_config(config_path)
@@ -59,12 +60,17 @@ class Orchestrator:
         self.broker_socket_path = "/tmp/claude_orchestrator.sock"
         self.broker_channel: Optional[UnixSocketChannel] = None
         
-        # Circuit breakers for external dependencies
-        self.agent_circuit_breaker = CircuitBreaker(
+        # Advanced circuit breakers for external dependencies
+        self.agent_circuit_breaker = AdvancedCircuitBreaker(
             failure_threshold=3,
+            success_threshold=2,
             timeout=30.0,
-            expected_exception=AgentStartupError
+            expected_exception=AgentStartupError,
+            health_check_interval=10.0
         )
+        
+        # Set up health check for agent circuit breaker
+        self.agent_circuit_breaker.set_health_check(self._check_agent_health)
         
     def _load_config(self, config_path: Optional[str]) -> Dict[str, Any]:
         """Load configuration file with proper error handling"""
@@ -520,6 +526,39 @@ class Orchestrator:
             "active_agents": len([a for a in self.agents.values() if a.is_running]),
             "total_agents": len(self.agents)
         }
+    
+    def _check_agent_health(self) -> bool:
+        """エージェントヘルスチェック"""
+        try:
+            active_agents = len([a for a in self.agents.values() if a.is_running])
+            return active_agents > 0
+        except Exception:
+            return False
+    
+    def get_enhanced_statistics(self) -> Dict[str, Any]:
+        """強化された統計情報を取得"""
+        basic_stats = self.get_statistics()
+        
+        # エラーハンドリング統計を追加
+        health_status = self.error_handler.get_health_status()
+        
+        return {
+            **basic_stats,
+            "error_handling": {
+                "health_status": health_status,
+                "circuit_breaker_state": self.agent_circuit_breaker.state,
+                "adaptive_retry_stats": {
+                    "total_patterns": len(self.error_handler.adaptive_retry.error_patterns),
+                    "success_rate_data_points": sum(
+                        len(rates) for rates in self.error_handler.adaptive_retry.success_rates.values()
+                    )
+                }
+            }
+        }
+    
+    def resolve_error_incident(self, incident_id: str, resolution_summary: str):
+        """エラーインシデントを解決"""
+        self.error_handler.resolve_incident(incident_id, resolution_summary)
 
 def create_task(task_type: str = "generic", description: str = "", files: List[str] = None, **kwargs) -> Task:
     """Helper function to easily create tasks"""
@@ -643,6 +682,7 @@ def main():
                     
     finally:
         orchestrator.stop()
+
 
 
 if __name__ == "__main__":
